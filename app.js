@@ -64,13 +64,20 @@
 
   // ---------- brand store ----------
   function setSync(t) { $('#sync').textContent = t; }
-  function loadLocalBrands() {
-    try { const l = JSON.parse(localStorage.getItem('iconstudio.brands') || 'null'); if (Array.isArray(l) && l.length) S.brands = l; } catch (e) {}
+  // Without the shared store (e.g. running from the git repo): start from brands.json, then apply anything saved in this browser.
+  async function loadLocalBrands() {
+    try { const f = await (await fetch('brands.json')).json(); if (Array.isArray(f) && f.length) S.brands = f; } catch (e) {}
+    try {
+      const l = JSON.parse(localStorage.getItem('iconstudio.brands') || 'null');
+      if (Array.isArray(l)) for (const b of l) { const i = S.brands.findIndex((x) => x.id === b.id); if (i >= 0) S.brands[i] = b; else S.brands.push(b); }
+    } catch (e) {}
+    S.brands.sort((a, b) => (a.order || 99) - (b.order || 99));
+    if (!S.brands.find((b) => b.id === S.brandId)) S.brandId = S.brands[0]?.id;
     setSync('נשמר בדפדפן זה בלבד');
   }
   async function initDb() {
     const db = await cap('db');
-    if (!db) { loadLocalBrands(); renderAll(); return; }
+    if (!db) { await loadLocalBrands(); renderAll(); return; }
     S.db = db; setSync('מתחבר לחברות המשותפות…');
     const timer = setTimeout(() => setSync('החברות המשותפות לא זמינות כרגע'), 10000);
     db.collection('brands').onSnapshot((snap) => {
@@ -384,7 +391,7 @@ Words: ${JSON.stringify(words)}`, { modelTier: 'quick' }) || {};
       <div class="field" style="margin:0 0 8px"><span class="lbl">סוג המעבר</span>${seg('ttype', T.TRANS.map((x) => [x.id, x.he]), S.trans.type)}</div>
       ${S.trans.type === 'slide' ? `<div class="field" style="margin:0 0 8px"><span class="lbl">כיוון</span>${seg('tdir', [['up', 'למעלה'], ['down', 'למטה'], ['right', 'ימינה'], ['left', 'שמאלה']], S.trans.dir)}</div>` : ''}
       ${S.trans.type === 'morph' ? `<div class="field" style="margin:0 0 8px"><span class="lbl">מומלצים למורף מ־${ic.n}</span><div id="trRecs" class="row" style="gap:6px;flex-wrap:wrap"><span class="status">מחשב…</span></div></div>` : ''}
-      <p class="status" style="margin:0 0 8px">${S.trans.type === 'morph' ? 'כל קו באייקון זורם לקו הקרוב אליו באייקון השני. קווים עודפים מתכווצים ונעלמים.' : S.trans.type === 'scale' ? 'שני האייקונים עוברים אותה הגדלה, והחיתוך ביניהם קורה בשיא התנועה, כמו match cut.' : 'האייקון יוצא מהמסגרת והאייקון הבא נכנס מהצד השני.'} ${S.anim.loop ? 'בלולאה המעבר חוזר גם אחורה.' : ''}</p>`;
+      <p class="status" style="margin:0 0 8px">${S.trans.type === 'morph' ? 'כל קו באייקון זורם לקו הקרוב אליו באייקון השני. קווים עודפים מתכווצים ונעלמים.' : S.trans.type === 'scale' ? 'שני האייקונים עוברים אותו שינוי גודל, והחיתוך ביניהם קורה בשיא התנועה, כמו match cut.' : 'האייקון יוצא מהמסגרת והאייקון הבא נכנס מהצד השני.'} ${S.anim.loop ? 'בלולאה המעבר חוזר גם אחורה.' : ''}</p>`;
   }
   function renderInspector() {
     const P = $('#inspector'), ic = icon(S.cur), b = brand();
@@ -851,7 +858,7 @@ Return ONLY JSON: {"primary":"#RRGGBB","secondary":"#RRGGBB","style":"...","stro
       ${sec('anim', 'הנפשה', `<ul><li>בוחרים הנפשה אחת או כמה יחד, למשל ציור קו + הגדלה. "ללא" מנקה את הבחירה.</li><li><b>משך:</b> מהירות ההנפשה. <b>השהיה בין קווים:</b> בציור קו, כמה כל קו מחכה לקודם. <b>חזרה:</b> בלולאה או פעם אחת.</li>
         <li><b>טשטוש תנועה:</b> טשטוש שתלוי במהירות. הוא חזק בתנועה מהירה ונעלם כשהאייקון עוצר.</li><li>בדו־טון עם ציור קו, המילוי נחשף יחד עם הקו של כל צורה.</li></ul>`)}
       ${sec('trans', 'מעבר בין אייקונים', `<p>בחלק ההנפשה עוברים ל<b>"מעבר בין אייקונים"</b> ובוחרים אייקון יעד מהסט, או ב"בחירה מהספרייה".</p>
-        <ul><li><b>החלקה:</b> match cut במיקום. האייקון יוצא מהמסגרת והבא נכנס מהצד השני.</li><li><b>הגדלה:</b> match cut בגודל. שני האייקונים עוברים אותה הגדלה והחיתוך קורה בשיא התנועה.</li>
+        <ul><li><b>החלקה:</b> match cut במיקום. האייקון יוצא מהמסגרת והבא נכנס מהצד השני.</li><li><b>שינוי גודל:</b> match cut בגודל. שני האייקונים מתכווצים יחד, החיתוך קורה בשיא התנועה, והאייקון החדש חוזר לגודל מלא. האייקון לא יוצא מהמסגרת ולא נחתך.</li>
         <li><b>מורף:</b> כל קו זורם לקו הקרוב אליו באייקון השני. כאן מופיעות המלצות: איזו גרסה של היעד עוברת הכי חלק, ואילו אייקונים קשורים עוברים הכי יפה.</li><li>בלולאה המעבר חוזר גם אחורה.</li></ul>`)}
       ${sec('export', 'ייצוא: איזה פורמט לאן', `<table class="gd-t"><thead><tr><th>פורמט</th><th>מתי</th><th>משקל טיפוסי</th></tr></thead><tbody>
         <tr><td>SVG</td><td>פיגמה, מצגות, אתר (סטטי)</td><td>פחות מ־1KB</td></tr>

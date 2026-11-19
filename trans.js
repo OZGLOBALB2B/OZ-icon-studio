@@ -5,7 +5,7 @@
 
   const TRANS = [
     { id: 'slide', he: 'החלקה', en: 'Slide' },
-    { id: 'scale', he: 'הגדלה', en: 'Scale' },
+    { id: 'scale', he: 'שינוי גודל', en: 'Scale' },
     { id: 'morph', he: 'מורף', en: 'Morph' },
   ];
   const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
@@ -38,8 +38,8 @@
       out.tx = dx * D * e; out.ty = dy * D * e; out.op = 1 - clamp((e - 0.35) / 0.55);
       inn.tx = -dx * D * (1 - e); inn.ty = -dy * D * (1 - e); inn.op = clamp((e - 0.1) / 0.55);
     } else if (tr.type === 'scale') {
-      // Match cut: one scale curve shared by both icons, hard cut at the peak of the move.
-      const P = 1.45, sc = u < 0.5 ? 1 + (P - 1) * Math.pow(2 * u, 3) : 1 + (P - 1) * Math.pow(1 - (2 * u - 1), 3);
+      // Match cut: one scale curve shared by both icons (shrinking, so nothing leaves the 24px frame), hard cut at the peak of the move.
+      const P = 0.6, sc = u < 0.5 ? 1 + (P - 1) * Math.pow(2 * u, 3) : 1 + (P - 1) * Math.pow(1 - (2 * u - 1), 3);
       out.sc = inn.sc = sc; out.op = u < 0.5 ? 1 : 0; inn.op = u < 0.5 ? 0 : 1;
     } else { // morph
       if (u > 0 && u < 1) { out.op = 0; inn.op = 0; m = eInOut(u); }
