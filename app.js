@@ -77,8 +77,8 @@
   }
   async function initDb() {
     const db = await cap('db');
-    if (!db) { await loadLocalBrands(); renderAll(); return; }
-    S.db = db; setSync('מתחבר לחברות המשותפות…');
+    if (!db) { await loadLocalBrands(); loadCustomIcons(null); renderAll(); return; }
+    S.db = db; setSync('מתחבר לחברות המשותפות…'); loadCustomIcons(db);
     const timer = setTimeout(() => setSync('החברות המשותפות לא זמינות כרגע'), 10000);
     db.collection('brands').onSnapshot((snap) => {
       if (!snap.metadata.fromCache) clearTimeout(timer);
@@ -107,11 +107,34 @@
 
   // ---------- rendering helpers ----------
   const lum = (hex) => { const [r, g, b] = G.hexToRgb(hex).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
-  function applyAccent() {
-    const b = brand(); if (!b) return;
-    document.documentElement.style.setProperty('--accent', b.primary);
-    document.documentElement.style.setProperty('--accent-ink', lum(b.primary) > 0.45 ? '#16171C' : '#FFFFFF');
+  // ---------- theme ----------
+  const contrast = (a, c) => { const x = lum(a), y = lum(c); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  const mixHex = (a, c, t) => { const p = G.hexToRgb(a), q = G.hexToRgb(c); return '#' + p.map((v, i) => Math.round(v + (q[i] - v) * t).toString(16).padStart(2, '0')).join(''); };
+  const SURF = { light: '#FFFFFF', dark: '#1A1B21' };
+  let themePref = 'auto'; try { themePref = localStorage.getItem('iconstudio.theme') || 'auto'; } catch (e) {}
+  const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  const isDark = () => themePref === 'dark' || (themePref === 'auto' && !!(mq && mq.matches));
+  // A plate behind icons when the brand's main colour would sink into the page (dark navy on dark, pale yellow on white).
+  function plateFor(b, dark = isDark()) {
+    const col = b.style === 'gradient' ? mixHex(b.primary, b.secondary, 0.5) : b.primary;
+    if (b.container && b.container !== 'none') return null;
+    if (dark && contrast(col, SURF.dark) < 3) return { bg: '#EDEDE9', ink: '#5A5B63', soft: '#E1E1DB' };
+    if (!dark && contrast(col, SURF.light) < 1.8) return { bg: '#24252C', ink: '#B4B5BC', soft: '#2E2F37' };
+    return null;
   }
+  function applyAccent() {
+    const b = brand(); if (!b) return; const root = document.documentElement, dark = isDark();
+    root.toggleAttribute('data-theme', themePref !== 'auto'); if (themePref !== 'auto') root.setAttribute('data-theme', themePref);
+    let acc = b.primary;
+    const bg = dark ? SURF.dark : SURF.light;
+    for (let t = 0.1; contrast(acc, bg) < 3.2 && t <= 1; t += 0.1) acc = mixHex(b.primary, dark ? '#FFFFFF' : '#000000', t);
+    root.style.setProperty('--accent', acc);
+    root.style.setProperty('--accent-ink', lum(acc) > 0.45 ? '#16171C' : '#FFFFFF');
+    const pl = plateFor(b, dark);
+    for (const [k, v] of [['--icbg', pl && pl.bg], ['--icink', pl && pl.ink], ['--icsoft', pl && pl.soft], ['--icplate', pl && pl.bg], ['--icplateink', pl && '#16171C']]) { if (v) root.style.setProperty(k, v); else root.style.removeProperty(k); }
+    const tb = $('#themeBtn'); if (tb) { tb.dataset.mode = themePref; tb.title = { auto: 'ערכת צבעים: לפי המערכת', light: 'ערכת צבעים: בהירה', dark: 'ערכת צבעים: כהה' }[themePref]; tb.setAttribute('aria-label', tb.title); }
+  }
+  if (mq && mq.addEventListener) mq.addEventListener('change', () => { if (themePref === 'auto') { applyAccent(); renderBrands(); } });
   const svgFor = (n, b, o = {}) => { const ic = icon(n); return ic ? G.svgStatic(ic, b, o) : ''; };
   const neutral = { primary: 'currentColor', secondary: 'currentColor', style: 'outline', stroke: 2, cap: 'round', join: 'round', container: 'none' };
 
@@ -119,7 +142,7 @@
   let brandMenuOpen = false;
   function renderBrands() {
     const cur = brand(), sw = (b) => `<span class="sw"><i style="background:${esc(b.primary)}"></i><i style="background:${esc(b.secondary)}"></i></span>`;
-    const prev = (b) => `<span class="bm-icons">${PREVIEW_ICONS.map((n) => svgFor(n, b, { size: 22, id: 'bm' + b.id })).join('')}</span>`;
+    const prev = (b) => { const pl = plateFor(b); return `<span class="bm-icons"${pl ? ` style="background:${pl.bg}"` : ''}>${PREVIEW_ICONS.map((n) => svgFor(n, b, { size: 22, id: 'bm' + b.id })).join('')}</span>`; };
     $('#brands').innerHTML = `<div class="bmenu">
         <button class="brand-chip bm-btn" id="bmBtn" aria-haspopup="listbox" aria-expanded="${brandMenuOpen}">${sw(cur)}<span class="bm-name">${esc(cur.name)}</span>${prev(cur)}<span class="bm-change">החלפת חברה ▾</span></button>
         <div class="bm-pop" id="bmPop" role="listbox" aria-label="בחירת חברה"${brandMenuOpen ? '' : ' hidden'}>
@@ -823,8 +846,8 @@ Return ONLY JSON: {"primary":"#RRGGBB","secondary":"#RRGGBB","style":"...","stro
     renderAll();
     try {
       const raw = await (await fetch('icons.json')).json();
-      const SRC = (n) => (n.startsWith('tb-') ? 'tb' : n.startsWith('hi-') ? 'hi' : 'lu');
-      const mk = (raw) => raw.map(([n, e, t]) => ({ n, e, t: t || [], src: SRC(n), b: n.replace(/^(tb|hi)-/, '') }));
+      const SRC = (n) => (n.startsWith('tb-') ? 'tb' : n.startsWith('hi-') ? 'hi' : n.startsWith('oz-') ? 'oz' : 'lu');
+      const mk = (raw) => raw.map(([n, e, t]) => ({ n, e, t: t || [], src: SRC(n), b: n.replace(/^(tb|hi|oz)-/, '') }));
       S.icons = mk(raw); S.icons.forEach((ic) => S.byName.set(ic.n, ic));
       const extra = await Promise.all(['icons-tabler.json', 'icons-hero.json'].map((f) => fetch(f).then((r) => r.json()).catch(() => [])));
       for (const x of extra) for (const ic of mk(x)) { S.icons.push(ic); S.byName.set(ic.n, ic); }
@@ -837,22 +860,243 @@ Return ONLY JSON: {"primary":"#RRGGBB","secondary":"#RRGGBB","style":"...","stro
   document.addEventListener('click', () => { if (brandMenuOpen) { brandMenuOpen = false; renderBrands(); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && brandMenuOpen) { brandMenuOpen = false; renderBrands(); $('#bmBtn').focus(); } });
 
+
+  // ---------- custom icons (prompt to icon) ----------
+  const ALLOWED = { path: ['d'], circle: ['cx', 'cy', 'r'], ellipse: ['cx', 'cy', 'rx', 'ry'], rect: ['x', 'y', 'width', 'height', 'rx', 'ry'], line: ['x1', 'y1', 'x2', 'y2'], polyline: ['points'], polygon: ['points'] };
+  function addCustomIcons(list) {
+    S.icons = S.icons.filter((x) => x.src !== 'oz');
+    for (const [n] of [...S.byName]) if (n.startsWith('oz-')) S.byName.delete(n);
+    for (const d of list) {
+      const ic = { n: d.n, e: d.e, t: d.t || [], src: 'oz', b: d.n.replace(/^oz-/, ''), custom: d };
+      S.icons.unshift(ic); S.byName.set(ic.n, ic);
+    }
+    renderGrid(); renderTray();
+  }
+  function loadCustomIcons(db) {
+    if (!db) { try { addCustomIcons(JSON.parse(localStorage.getItem('iconstudio.custom') || '[]')); } catch (e) {} return; }
+    db.collection('icons').onSnapshot((snap) => {
+      addCustomIcons(snap.docs.map((d) => d.data()).filter((d) => d && d.n && Array.isArray(d.e)).sort((a, b) => (b.created || 0) - (a.created || 0)));
+    }, () => {});
+  }
+  async function saveCustomIcon(doc) {
+    if (S.db) { await S.db.collection('icons').doc(doc.n).set(doc); return 'shared'; }
+    const cur = S.icons.filter((x) => x.src === 'oz').map((x) => x.custom);
+    const all = [doc, ...cur.filter((x) => x.n !== doc.n)];
+    try { localStorage.setItem('iconstudio.custom', JSON.stringify(all)); } catch (e) {}
+    addCustomIcons(all); return 'local';
+  }
+  // Keep only safe, stroke-only geometry Claude returned; null when it can't be drawn.
+  function cleanIcon(o, k) {
+    if (!o || !Array.isArray(o.elements)) return null;
+    const e = [];
+    for (const it of o.elements.slice(0, 16)) {
+      const [tag, a] = Array.isArray(it) ? it : [it && it.tag, it && it.attrs];
+      if (!ALLOWED[tag] || !a || typeof a !== 'object') continue;
+      const out = {};
+      for (const key of ALLOWED[tag]) if (a[key] != null) {
+        const v = String(a[key]).trim();
+        if (key === 'd' ? /^[MmLlHhVvCcSsQqTtAaZz0-9.,\s+\-eE]+$/.test(v) : key === 'points' ? /^[0-9.,\s+\-]+$/.test(v) : /^-?[0-9.]+$/.test(v)) out[key] = v;
+      }
+      if (Object.keys(out).length) e.push([tag, out]);
+    }
+    if (!e.length) return null;
+    const slugN = String(o.name || 'icon').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'icon';
+    const ic = { n: `gen-${Date.now().toString(36)}-${k}`, e, t: (Array.isArray(o.tags) ? o.tags : []).map((x) => String(x).toLowerCase()).slice(0, 12), src: 'oz', b: slugN };
+    try { const svg = G.svgStatic(ic, brand(), { size: 48, id: 'gv' }); if (/NaN|undefined/.test(svg)) return null; } catch (err) { return null; }
+    ic.name = slugN; ic.idea = String(o.idea || '').slice(0, 140);
+    return ic;
+  }
+  const GEN = { refs: [], images: [], options: [], picked: null, busy: false, mode: 'close', check: true };
+  // Panels on a 24-unit coordinate grid (0..24, the icon area 2..22 marked), so Claude can read positions in icon units.
+  function gridSheet(panels, labels) {
+    const P = 480, M = 34, W = panels.length * (P + M) + M, H = P + M * 2;
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+    panels.forEach((pn, i) => {
+      const x0 = M + i * (P + M), y0 = M, u = P / 24;
+      pn.draw(ctx, x0 + 2 * u, y0 + 2 * u, 20 * u);
+      for (let k = 0; k <= 24; k++) {
+        ctx.strokeStyle = k % 4 === 0 ? 'rgba(220,40,60,.45)' : 'rgba(40,120,220,.18)'; ctx.lineWidth = k % 4 === 0 ? 1.2 : 0.8;
+        ctx.beginPath(); ctx.moveTo(x0 + k * u, y0); ctx.lineTo(x0 + k * u, y0 + P); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x0, y0 + k * u); ctx.lineTo(x0 + P, y0 + k * u); ctx.stroke();
+        if (k % 4 === 0) { ctx.fillStyle = '#c02838'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(k, x0 + k * u, y0 - 8); ctx.textAlign = 'right'; ctx.fillText(k, x0 - 5, y0 + k * u + 4); }
+      }
+      ctx.strokeStyle = 'rgba(0,160,90,.6)'; ctx.setLineDash([6, 4]); ctx.strokeRect(x0 + 2 * u, y0 + 2 * u, 20 * u, 20 * u); ctx.setLineDash([]);
+      ctx.fillStyle = '#111'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(labels[i] || '', x0 + P / 2, y0 + P + 24);
+    });
+    return c;
+  }
+  async function optionSheet(opts) {
+    const imgs = await Promise.all(opts.map((ic) => svgImage(G.svgStatic(ic, { ...neutral, primary: '#111111', secondary: '#111111' }, { size: 480, id: 'cs' }))));
+    const sheet = gridSheet(imgs.map((im) => ({ draw: (ctx, x, y, w) => { const u = w / 20; ctx.drawImage(im, x - 2 * u, y - 2 * u, w + 4 * u, w + 4 * u); } })), opts.map((_, i) => 'אפשרות ' + (i + 1)));
+    return new Promise((r) => sheet.toBlob(r, 'image/png'));
+  }
+  async function shrinkImage(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      const k = Math.min(1, 768 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const grid = gridSheet([{ draw: (ctx, x, y, w) => { const k = Math.min(w / c.width, w / c.height); ctx.drawImage(c, x + (w - c.width * k) / 2, y + (w - c.height * k) / 2, c.width * k, c.height * k); } }], ['רפרנס']);
+      return { blob: await new Promise((r) => c.toBlob(r, 'image/png')), url: c.toDataURL('image/png'), grid: await new Promise((r) => grid.toBlob(r, 'image/png')) };
+    } finally { URL.revokeObjectURL(url); }
+  }
+  function genPrompt(desc, refine) {
+    const close = GEN.mode === 'close' && (GEN.images.length || GEN.refs.length);
+    const ex = (GEN.refs.length ? GEN.refs : ['droplet', 'shield-check', 'truck', 'chart-line']).map((n) => icon(n)).filter(Boolean).map((ic) => JSON.stringify({ name: ic.b, elements: ic.e }));
+    return `You design icons in the exact geometric language of the Lucide icon set.
+Rules for every icon:
+- 24x24 grid, drawn as STROKES ONLY (no fills): the app applies stroke width 2, round caps and joins, and its own colours.
+- Keep all geometry inside x,y 2..22. Use whole or half units. Corner radius 2 on rectangles, small arcs for rounded turns.
+- Allowed elements: path (d with M L H V C S Q A Z, absolute or relative), circle (cx cy r), ellipse, rect (x y width height rx), line, polyline, polygon.
+- 1 to 8 elements. Simple, readable at 16px, one clear metaphor, no text or letters unless asked, no tiny details closer than 2 units apart.
+- Optically balanced: the visual weight centred on 12,12.
+${GEN.refs.length ? 'Match the style, proportions and detail level of these reference icons closely:' : 'Examples of the target style:'}
+${ex.join('\n')}
+${GEN.images.length ? (close
+  ? `The attached reference image${GEN.images.length > 1 ? 's are' : ' is'} drawn on a 24-unit coordinate grid: red numbers every 4 units, the dashed green square is the 2..22 icon area, and the reference is scaled into that square. READ COORDINATES FROM THE GRID: where the reference's main outline, corners, centres and inner lines sit, in grid units. Recreate the reference as a stroke icon at those positions, keeping its silhouette, proportions, composition and distinctive details. Do not substitute a different metaphor.`
+  : `The attached image${GEN.images.length > 1 ? 's are' : ' is'} inspiration for the subject, metaphor or style, shown on a 24-unit grid. Translate it into this stroke language; do not copy photographic detail.`) : ''}
+${refine ? `Start from this icon and make 4 variations that apply the feedback.\nIcon: ${JSON.stringify({ name: refine.name, elements: refine.e })}\nFeedback: ${refine.feedback}`
+  : close ? `Before drawing, write a short "plan": the reference's main shapes with their grid coordinates. Then make 4 options that all stay close to the reference:
+1) faithful: the reference's outline and key inner lines at the measured coordinates;
+2) faithful but cleaned: same layout, geometry snapped to clean circles, rectangles and straight lines;
+3) simplified: same silhouette with fewer inner details;
+4) minimal: the most recognisable reading of the reference in 2-4 elements.`
+  : `Make 4 clearly different design options (different metaphors or compositions, not small tweaks).`}
+Request (may be in Hebrew): ${desc}
+Return ONLY JSON: {"plan":"short text","options":[{"name":"kebab-case-english-name","idea":"one short sentence in Hebrew describing the concept","tags":["english","search","words"],"elements":[["path",{"d":"..."}],["circle",{"cx":"12","cy":"12","r":"3"}]]}]}`;
+  }
+  function renderGenOptions() {
+    const box = $('#genOpts'); if (!box) return; const b = brand();
+    box.innerHTML = GEN.options.map((ic, i) => `<button class="gen-opt" data-gi="${i}" aria-pressed="${GEN.picked === i}" title="${esc(ic.name)}">
+        <span class="gen-prev">${G.svgStatic(ic, b, { size: 72, id: 'go' + i })}</span>
+        <span class="gen-sm">${G.svgStatic(ic, b, { size: 20, id: 'gs' + i })}${G.svgStatic(ic, neutral, { size: 20, id: 'gn' + i })}</span>
+        <span class="gen-idea">${esc(ic.idea || ic.name)}</span></button>`).join('');
+    $$('[data-gi]', box).forEach((x) => x.onclick = () => { GEN.picked = +x.dataset.gi; renderGenOptions(); renderGenPick(); });
+  }
+  function renderGenPick() {
+    const el = $('#genPick'); if (!el) return; const ic = GEN.options[GEN.picked];
+    if (!ic) { el.hidden = true; return; }
+    el.hidden = false; $('#genName').value = ic.name; $('#genTags').value = ic.t.join(', ');
+  }
+  async function runGen(refine) {
+    const desc = $('#genDesc').value.trim(); const st = $('#genStatus');
+    if (!desc) { st.textContent = 'כתבו תיאור של האייקון'; $('#genDesc').focus(); return; }
+    const sample = await cap('sample');
+    if (!sample) { st.textContent = 'יצירת אייקונים עובדת רק בתוך claude.ai, כי היא משתמשת ב־Claude.'; return; }
+    if (GEN.busy) return; GEN.busy = true; $('#genGo').disabled = true; $('#genRefine').disabled = true;
+    st.textContent = refine ? 'Claude משפר את האייקון…' : GEN.check && GEN.images.length && GEN.mode === 'close' ? 'שלב 1 מתוך 2: Claude קורא את הרפרנס ומשרטט 4 אפשרויות…' : 'Claude מעצב 4 אפשרויות…';
+    try {
+      const refImgs = GEN.images.map((x) => x.grid || x.blob);
+      const r = await sample.json(genPrompt(desc, refine), { modelTier: 'complex', ...(refImgs.length ? { images: refImgs } : {}) });
+      let opts = (r && Array.isArray(r.options) ? r.options : []).map((o, k) => cleanIcon(o, k)).filter(Boolean);
+      if (!opts.length) throw new Error('לא התקבלו אייקונים תקינים');
+      if (GEN.check && refImgs.length && GEN.mode === 'close') {
+        GEN.options = opts; GEN.picked = null; renderGenOptions(); renderGenPick();
+        st.textContent = 'שלב 2 מתוך 2: Claude משווה את האפשרויות לרפרנס ומתקן…';
+        try {
+          const sheet = await optionSheet(opts);
+          const fix = await sample.json(`You are checking stroke icons against a reference. Image(s) 1..${refImgs.length}: the reference on a 24-unit grid (red numbers every 4 units, dashed green square = 2..22 icon area). Last image: the current options drawn on the SAME grid, labelled in order.
+For each option compare it with the reference: silhouette, proportions, positions of corners/centres/inner lines in grid units, missing or extra details. Then return a corrected version of every option that matches the reference more closely, keeping that option's level of simplification (1 faithful, 2 cleaned, 3 simplified, 4 minimal). Keep the same rules: strokes only, inside 2..22, path/circle/ellipse/rect/line/polyline/polygon, 1-8 elements.
+Current options: ${JSON.stringify(opts.map((o) => ({ name: o.name, idea: o.idea, tags: o.t, elements: o.e })))}
+Request: ${desc}
+Return ONLY JSON: {"options":[{"name":"...","idea":"short Hebrew sentence","tags":["..."],"elements":[["path",{"d":"..."}]]}]}`, { modelTier: 'complex', images: [...refImgs, sheet] });
+          const fixed = (fix && Array.isArray(fix.options) ? fix.options : []).map((o, k) => cleanIcon(o, k + 10)).filter(Boolean);
+          if (fixed.length) opts = fixed;
+        } catch (e) { /* keep the first-pass options */ }
+      }
+      GEN.options = opts; GEN.picked = null; renderGenOptions(); renderGenPick();
+      st.textContent = `התקבלו ${opts.length} אפשרויות. בחרו אחת כדי לשמור או לשפר אותה.`;
+    } catch (e) {
+      st.textContent = e && e.code === 'not_granted' ? 'אין הרשאה להשתמש ב־Claude מהדף.' : e && e.code === 'rate_limited' ? 'יותר מדי בקשות. נסו שוב בעוד דקה.' : 'היצירה נכשלה: ' + ((e && e.message) || 'נסו שוב');
+    }
+    GEN.busy = false; $('#genGo').disabled = false; $('#genRefine').disabled = false;
+  }
+  function renderGenRefs() {
+    const el = $('#genRefs'); if (!el) return; const b = brand();
+    el.innerHTML = GEN.refs.map((n) => `<span class="ti" title="${n}">${svgFor(n, b, { size: 26, id: 'gr' })}<button class="tix" data-grm="${n}" aria-label="הסרה של ${n}">×</button></span>`).join('')
+      + (GEN.refs.length < 6 ? `<button class="btn small" id="genAddCur">+ האייקון הנבחר (${esc(S.cur)})</button>${S.set.length ? '<button class="btn small" id="genAddSet">+ מהסט</button>' : ''}` : '');
+    $$('[data-grm]', el).forEach((x) => x.onclick = () => { GEN.refs = GEN.refs.filter((n) => n !== x.dataset.grm); renderGenRefs(); });
+    const ac = $('#genAddCur'); if (ac) ac.onclick = () => { if (!GEN.refs.includes(S.cur)) GEN.refs.push(S.cur); renderGenRefs(); };
+    const as = $('#genAddSet'); if (as) as.onclick = () => { for (const n of S.set) if (GEN.refs.length < 6 && !GEN.refs.includes(n)) GEN.refs.push(n); renderGenRefs(); };
+  }
+  function renderGenImages() {
+    const el = $('#genImgs'); if (!el) return;
+    el.innerHTML = GEN.images.map((x, i) => `<span class="gen-img"><img src="${x.url}" alt="השראה ${i + 1}"><button class="tix" data-gim="${i}" aria-label="הסרת תמונה">×</button></span>`).join('');
+    $$('[data-gim]', el).forEach((x) => x.onclick = () => { GEN.images.splice(+x.dataset.gim, 1); renderGenImages(); });
+  }
+  function openGen() {
+    const d = $('#genDlg');
+    d.innerHTML = `<div class="dlg"><div class="dlghead"><div><h2 style="margin:0">יצירת אייקון מתיאור</h2><h3>Claude מעצב אפשרויות בשפה של ספריית האייקונים, והאייקון שבוחרים נשמר במאגר</h3></div><button class="btn ghost" data-close>סגירה</button></div>
+      <div class="field" style="margin:0"><label for="genDesc">מה האייקון צריך להראות?</label><textarea class="text" id="genDesc" rows="2" placeholder="למשל: מנורת UV שמטהרת טיפת מים, או משאית קירור עם פתית שלג">${esc($('#genDesc')?.value || '')}</textarea></div>
+      <div class="grid2">
+        <div class="field" style="margin:0"><span class="lbl">תמונות השראה (לא חובה)</span><div class="row" style="gap:6px;flex-wrap:wrap"><span id="genImgs" class="row" style="gap:6px;flex-wrap:wrap"></span><label class="btn small">+ העלאת תמונה<input type="file" id="genFile" accept="image/*" multiple hidden></label></div></div>
+        <div class="field" style="margin:0"><span class="lbl">אייקונים לחיקוי הסגנון (לא חובה)</span><div class="row" id="genRefs" style="gap:6px;flex-wrap:wrap"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="field" style="margin:0"><span class="lbl">כמה קרוב לרפרנס</span>${seg('gmode', [['close', 'קרוב לרפרנס'], ['free', 'חופשי, רעיונות שונים']], GEN.mode)}</div>
+        <div class="field" style="margin:0"><span class="lbl">בדיקה מול הרפרנס</span><label class="row" style="gap:6px;font-size:13px;min-height:34px"><input type="checkbox" id="genCheck" ${GEN.check ? 'checked' : ''}> שלב שני: Claude משווה לרפרנס ומתקן (איטי יותר)</label></div>
+      </div>
+      <p class="status" style="margin:0">ב"קרוב לרפרנס" התמונה מונחת על גריד של 24 יחידות, Claude קורא ממנה מיקומים אמיתיים, וכל 4 האפשרויות הן אותו אייקון ברמות פישוט שונות: נאמן, מנוקה, מפושט, מינימלי.</p>
+      <div class="row"><button class="btn primary" id="genGo">יצירת 4 אפשרויות</button><span class="status" id="genStatus"></span></div>
+      <div class="gen-opts" id="genOpts"></div>
+      <div id="genPick" hidden class="gen-pick">
+        <div class="grid2">
+          <div class="field" style="margin:0"><label for="genName">שם האייקון (באנגלית)</label><input class="text mono" id="genName" maxlength="40"></div>
+          <div class="field" style="margin:0"><label for="genTags">מילות חיפוש, מופרדות בפסיק</label><input class="text" id="genTags"></div>
+        </div>
+        <div class="row" style="flex-wrap:wrap"><button class="btn primary" id="genSave">שמירה במאגר</button><label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="genToSet" checked> להוסיף גם לסט שלי</label></div>
+        <div class="row" style="flex-wrap:wrap"><input class="text" id="genFeedback" placeholder="מה לשפר? למשל: קו נקי יותר, טיפה גדולה יותר, בלי הקרניים" style="flex:1;min-width:200px"><button class="btn" id="genRefine">שיפור האפשרות הזו</button></div>
+      </div></div>`;
+    d.querySelector('[data-close]').onclick = () => d.close();
+    $('#genFile').onchange = async (e) => { for (const f of [...e.target.files].slice(0, 4 - GEN.images.length)) { try { GEN.images.push(await shrinkImage(f)); } catch (err) {} } e.target.value = ''; renderGenImages(); };
+    $('#genGo').onclick = () => runGen(null);
+    $$('.seg[data-k="gmode"] button', d).forEach((x) => x.onclick = () => { GEN.mode = x.dataset.v; $$('.seg[data-k="gmode"] button', d).forEach((y) => y.setAttribute('aria-pressed', y === x)); });
+    $('#genCheck').onchange = (e) => { GEN.check = e.target.checked; };
+    $('#genRefine').onclick = () => { const ic = GEN.options[GEN.picked]; const fb = $('#genFeedback').value.trim(); if (!ic) return; if (!fb) { $('#genStatus').textContent = 'כתבו מה לשפר'; $('#genFeedback').focus(); return; } runGen({ name: ic.name, e: ic.e, feedback: fb }); };
+    $('#genSave').onclick = async () => {
+      const ic = GEN.options[GEN.picked]; if (!ic) return;
+      let base = ($('#genName').value || ic.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'icon', n = 'oz-' + base, k = 2;
+      while (S.byName.has(n)) n = `oz-${base}-${k++}`;
+      const doc = { n, e: ic.e, t: [...new Set([...$('#genTags').value.split(/[,،]/).map((x) => x.trim().toLowerCase()).filter(Boolean), ...base.split('-')])].slice(0, 16), prompt: $('#genDesc').value.trim().slice(0, 500), created: Date.now() };
+      $('#genSave').disabled = true;
+      try {
+        const where = await saveCustomIcon(doc);
+        if (!S.byName.has(n)) addCustomIcons([doc, ...S.icons.filter((x) => x.src === 'oz').map((x) => x.custom)]);
+        if ($('#genToSet').checked && !S.set.includes(n)) { S.set.push(n); saveSession(); renderTray(); }
+        select(n); toast(where === 'shared' ? `${n} נשמר במאגר המשותף` : `${n} נשמר בדפדפן הזה`);
+        $('#genStatus').textContent = `נשמר בשם ${n}. אפשר למצוא אותו בספרייה תחת "OZ".`;
+      } catch (e) { $('#genStatus').textContent = 'השמירה נכשלה: ' + ((e && e.message) || 'נסו שוב'); }
+      $('#genSave').disabled = false;
+    };
+    renderGenImages(); renderGenRefs(); renderGenOptions(); renderGenPick();
+    d.showModal();
+  }
+  $('#genBtn').onclick = openGen;
+
   // ---------- guide ----------
   function openGuide() {
     const d = $('#guideDlg');
     const sec = (id, title, body) => `<section class="gd-sec" id="gd-${id}"><h3>${title}</h3>${body}</section>`;
     d.innerHTML = `<div class="dlg gd"><div class="dlghead"><div><h2 style="margin:0">מדריך למנוע האייקונים</h2><h3>איך מעצבים, מנפישים ומייצאים אייקונים בשפה של כל חברה</h3></div><button class="btn ghost" data-close>סגירה</button></div>
-      <nav class="gd-toc">${[['what', 'מה זה'], ['brand', 'חברות'], ['style', 'סגנון'], ['find', 'חיפוש'], ['set', 'הסט'], ['anim', 'הנפשה'], ['trans', 'מעברים'], ['export', 'ייצוא'], ['tips', 'טיפים']].map(([a, l]) => `<a href="#gd-${a}">${l}</a>`).join('')}</nav>
+      <nav class="gd-toc">${[['what', 'מה זה'], ['brand', 'חברות'], ['style', 'סגנון'], ['find', 'חיפוש'], ['gen', 'יצירת אייקון'], ['set', 'הסט'], ['anim', 'הנפשה'], ['trans', 'מעברים'], ['export', 'ייצוא'], ['tips', 'טיפים']].map(([a, l]) => `<a href="#gd-${a}">${l}</a>`).join('')}</nav>
       <div class="gd-body">
       ${sec('what', 'מה זה עושה', `<p>המנוע לוקח אייקוני קו מוכנים ומעצב אותם מחדש לפי השפה הוויזואלית של כל חברה: צבעים, עובי קו, פינות, קצוות ומסגרת. אחר כך אפשר להנפיש אותם ולייצא לכל פורמט שצריך.</p>
         <p>יש בו 7,350 אייקונים משלוש ספריות פתוחות לשימוש מסחרי: <b>Lucide</b> (2,091), <b>Tabler</b> (4,935) ו־<b>Heroicons</b> (324). כולם בנויים על גריד של 24px, כך שהם נראים אחידים גם כשמערבבים ביניהם.</p>`)}
       ${sec('brand', 'בחירת חברה והוספת חברה חדשה', `<ol><li>למעלה מוצגת החברה הנוכחית. <b>"החלפת חברה"</b> פותח רשימה שבה כל חברה מוצגת עם האייקונים בסגנון שלה.</li>
         <li><b>"+ חברה חדשה"</b> בתחתית הרשימה. יש שתי דרכים להזין את המותג:<ul><li><b>Brandbook ב־PDF:</b> המנוע קורא את כל המסמך ומחלץ צבעים וסגנון.</li><li><b>קישור לפיגמה:</b> לפריים של צבעים או של ה־guideline. בפיגמה: לחיצה ימנית על הפריים ← Copy link to selection.</li></ul></li>
         <li>Claude מציע סגנון התחלתי, ואפשר לערוך הכול בחלונית "סגנון המותג" ולשמור. חברות שנשמרות משותפות לכל הצוות.</li></ol>`)}
+      ${sec('theme', 'מצב כהה', `<p>הכפתור שליד "מדריך" מחליף בין מצב בהיר, מצב כהה ומצב לפי המערכת. במצב כהה, צבע מותג כהה מדי (למשל כחול נייבי) מוצג בממשק בגרסה בהירה יותר, והאייקונים מוצגים על כרטיס בהיר כדי שהצבעים לא ייבלעו. הקבצים המיוצאים לא משתנים.</p>`)}
       ${sec('style', 'סגנון המותג', `<ul><li><b>צבעים:</b> ראשי ומשני.</li><li><b>סגנון:</b> קו (צבע אחד), דו־טון (קו ומילוי בגוון של הצבע המשני), שני צבעים (הצורה הראשית בצבע אחד והפרטים בשני), גרדיאנט.</li>
         <li><b>עובי קו, קצה קו ופינות:</b> מעוגלות, חדות או חתוכות. "חדות" הופך גם את הפינות המעוגלות שבתוך האייקון לפינות אמיתיות.</li><li><b>עוצמת המילוי:</b> בדו־טון, כמה חזק הגוון. המילוי תמיד אטום, כך שהוא נראה אותו דבר עם רקע ובלי רקע.</li><li><b>מסגרת:</b> בלי, עיגול או ריבוע מעוגל בצבע לבחירה.</li></ul>`)}
       ${sec('find', 'מציאת אייקונים', `<ul><li><b>חיפוש בספרייה:</b> אפשר לחפש בעברית או באנגלית ("משלוח", "truck"). מילה שלא נמצאת במילון נשלחת ל־Claude לתרגום.</li><li><b>סינון:</b> הכל, Lucide, Tabler או Heroicons. שמות של Tabler מתחילים ב־<span class="mono">tb-</span> ושל Heroicons ב־<span class="mono">hi-</span>.</li>
         <li><b>רשימת מילים:</b> מדביקים רשימה של נושאים (למשל מהבריף), והמנוע מציע אייקון לכל מילה עם חלופות.</li></ul>`)}
+      ${sec('gen', 'יצירת אייקון מתיאור', `<ol><li>בסרגל הספרייה לוחצים <b>"✦ יצירת אייקון"</b> ומתארים מה האייקון צריך להראות, בעברית או באנגלית.</li>
+        <li>אפשר להוסיף <b>תמונות השראה</b> (עד 4) ו<b>אייקונים לחיקוי הסגנון</b>: האייקון הנבחר או אייקונים מהסט.</li>
+        <li><b>קרוב לרפרנס</b> (ברירת המחדל כשיש רפרנס): התמונה מונחת על גריד של 24 יחידות, ו־Claude מודד ממנה מיקומים. 4 האפשרויות הן אותו אייקון ברמות פישוט שונות: נאמן, מנוקה, מפושט ומינימלי. <b>חופשי:</b> 4 רעיונות שונים.</li>
+        <li><b>בדיקה מול הרפרנס:</b> שלב שני שבו האפשרויות מצוירות על אותו גריד ליד הרפרנס, ו־Claude מתקן את מה ששונה. לוקח יותר זמן, אבל התוצאה קרובה יותר.</li>
+        <li>בוחרים אפשרות. אפשר לבקש שיפור ("קו נקי יותר", "בלי הקרניים") ולקבל 4 וריאציות שלה.</li>
+        <li><b>"שמירה במאגר"</b> מוסיף את האייקון לספרייה תחת <b>OZ</b>, עם שם שמתחיל ב־<span class="mono">oz-</span>. הוא משותף לכל הצוות, ומקבל עיצוב, הנפשה, מעברים וייצוא כמו כל אייקון אחר.</li></ol>`)}
       ${sec('set', 'הסט שלי', `<ul><li><b>+</b> על אייקון מוסיף אותו לסט שבתחתית המסך. אין הגבלה על מספר האייקונים בסט.</li><li>לחיצה על אייקון בסט פותחת אותו בחלונית האייקון הנבחר. <b>×</b> מסיר אותו מהסט.</li>
         <li>הכפתור של הסט פותח תצוגה של כל הסט מונפש, ומשם מורידים את כולו כ־ZIP בפורמטים שבוחרים, או מעתיקים לפיגמה.</li></ul>`)}
       ${sec('anim', 'הנפשה', `<ul><li>בוחרים הנפשה אחת או כמה יחד, למשל ציור קו + הגדלה. "ללא" מנקה את הבחירה.</li><li><b>משך:</b> מהירות ההנפשה. <b>השהיה בין קווים:</b> בציור קו, כמה כל קו מחכה לקודם. <b>חזרה:</b> בלולאה או פעם אחת.</li>
@@ -874,5 +1118,6 @@ Return ONLY JSON: {"primary":"#RRGGBB","secondary":"#RRGGBB","style":"...","stro
     d.showModal();
   }
   $('#guideBtn').onclick = openGuide;
+  $('#themeBtn').onclick = () => { themePref = { auto: 'light', light: 'dark', dark: 'auto' }[themePref]; try { localStorage.setItem('iconstudio.theme', themePref); } catch (e) {} applyAccent(); renderBrands(); toast($('#themeBtn').title); };
   boot();
 })();
