@@ -149,6 +149,7 @@
   }
   /* One frame (preview / GIF). */
   function svgFrame(A, B, b, tr, p, opts = {}) {
+    b = U.effColors(b);
     const st = state(tr, p), id = opts.id || 'tf', size = opts.size || 24;
     let inner = '', defs = '';
     for (const [k, ic] of [['A', A], ['B', B]]) {
@@ -162,6 +163,7 @@
   }
   /* Self-contained animated SVG: CSS keyframes for the two glyphs, SMIL path animation for the morph. */
   function svgAnimated(A, B, b, tr, opts = {}) {
+    b = U.effColors(b);
     const { cycle } = timing(tr), STEPS = 90, size = opts.size || 24, id = (opts.id || 'oz') + 't';
     const frames = []; for (let s = 0; s <= STEPS; s++) frames.push(state(tr, s / STEPS));
     const pct = (s) => f((s / STEPS) * 100) + '%', iter = tr.loop ? 'infinite' : '1 both', dur = f(cycle) + 's';
@@ -189,6 +191,7 @@
 
   // ---------- Lottie ----------
   function lottie(A, B, b, tr, opts = {}) {
+    b = U.effColors(b);
     const W = opts.size || 512, fr = 30, { cycle } = timing(tr), op = Math.max(2, Math.round(cycle * fr));
     const states = []; for (let t = 0; t <= op; t++) states.push(state(tr, t / op));
     const base = IG.lottie(A, b, { type: 'none' }, { size: W, bg: opts.bg });

@@ -118,6 +118,7 @@
   const isDark = () => themePref === 'dark' || (themePref === 'auto' && !!(mq && mq.matches));
   // A plate behind icons when the brand's main colour would sink into the page (dark navy on dark, pale yellow on white).
   function plateFor(b, dark = isDark()) {
+    b = G.util.effColors(b);
     const col = b.style === 'gradient' ? mixHex(b.primary, b.secondary, 0.5) : b.primary;
     if (b.container && b.container !== 'none') return null;
     if (dark && contrast(col, SURF.dark) < 3) return { bg: '#EDEDE9', ink: '#5A5B63', soft: '#E1E1DB' };
@@ -125,7 +126,7 @@
     return null;
   }
   function applyAccent() {
-    const b = brand(); if (!b) return; const root = document.documentElement, dark = isDark();
+    const b = G.util.effColors(brand()); if (!b) return; const root = document.documentElement, dark = isDark();
     root.toggleAttribute('data-theme', themePref !== 'auto'); if (themePref !== 'auto') root.setAttribute('data-theme', themePref);
     let acc = b.primary;
     const bg = dark ? SURF.dark : SURF.light;
@@ -189,7 +190,10 @@
       <div class="field"><label for="bName">שם החברה</label><input class="text" id="bName" value="${esc(b.name)}"></div>
       ${b.notes ? `<p class="notes">${esc(b.notes)}</p>` : ''}
       <div class="specimen" aria-label="דוגמה">${SPECIMEN.map((n) => `<div>${svgFor(n, b, { size: 32, id: 'sp' + n })}</div>`).join('')}</div>
-      <div class="field"><span class="lbl">צבעים</span>${colorField('primary', 'ראשי', b.primary)}${colorField('secondary', 'משני', b.secondary)}</div>
+      <div class="field"><span class="lbl">צבעים</span>${colorField('primary', 'ראשי', b.primary)}${colorField('secondary', 'משני', b.secondary)}
+        <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button class="btn small" id="bSwap" title="החלפה בין הצבע הראשי למשני">⇄ החלפה בין ראשי למשני</button></div></div>
+      <div class="field"><span class="lbl">שימוש בצבעים</span>${seg('colorUse', [['both', 'שניהם'], ['primary', 'רק ראשי'], ['secondary', 'רק משני']], b.colorUse || 'both')}
+        ${b.colorUse && b.colorUse !== 'both' ? `<span class="status">האייקונים בצבע אחד. הצבע ה${b.colorUse === 'primary' ? 'משני' : 'ראשי'} נשמר ולא נמחק.</span>` : ''}</div>
       <div class="field"><span class="lbl">סגנון</span>${seg('style', Object.entries(STYLE_LABELS), b.style)}</div>
       <div class="field"><label for="r-stroke">עובי קו</label><div class="row"><input type="range" id="r-stroke" data-k="stroke" min="0.75" max="3" step="0.25" value="${b.stroke}"><span class="val">${b.stroke}px</span></div></div>
       ${b.style === 'duotone' ? `<div class="field"><label for="r-fill">עוצמת המילוי</label><div class="row"><input type="range" id="r-fill" data-k="fillOpacity" min="0.1" max="1" step="0.05" value="${b.fillOpacity ?? 0.3}"><span class="val">${Math.round((b.fillOpacity ?? 0.3) * 100)}%</span></div></div>` : ''}
@@ -213,6 +217,7 @@
     $$('input[type=range]', P).forEach((r) => r.oninput = () => edit(r.dataset.k, +r.value));
     $$('input[type=color]', P).forEach((c) => c.oninput = () => edit(c.dataset.k, c.value.toUpperCase()));
     $$('.color input[type=text]', P).forEach((c) => c.onchange = () => { let v = c.value.trim(); if (!v.startsWith('#')) v = '#' + v; if (/^#[0-9a-f]{6}$/i.test(v)) edit(c.dataset.k, v.toUpperCase()); else { c.value = brand()[c.dataset.k]; toast('צבע צריך להיות בפורמט HEX, למשל #202657'); } });
+    $('#bSwap').onclick = () => { if (!S.draft) S.draft = clone(brand()); const t = S.draft.primary; S.draft.primary = S.draft.secondary; S.draft.secondary = t; S.dirty = true; refreshStyle(); };
     $('#bSave').onclick = async () => { const d = S.draft; S.draft = null; S.dirty = false; await persistBrand(d); renderAll(); };
     $('#bRevert').onclick = () => { S.draft = null; S.dirty = false; renderAll(); };
     $('#bBook').onclick = () => openBrandDialog(brand());
@@ -1553,7 +1558,7 @@ Return ONLY JSON: {"options":[{"name":"...","elements":[["path",{"d":"..."}]]}]}
         <li><b>"+ חברה חדשה"</b> בתחתית הרשימה. יש שתי דרכים להזין את המותג:<ul><li><b>Brandbook ב־PDF:</b> המנוע קורא את כל המסמך ומחלץ צבעים וסגנון.</li><li><b>קישור לפיגמה:</b> לפריים של צבעים או של ה־guideline. בפיגמה: לחיצה ימנית על הפריים ← Copy link to selection.</li></ul></li>
         <li>Claude מציע סגנון התחלתי, ואפשר לערוך הכול בחלונית "סגנון המותג" ולשמור. חברות שנשמרות משותפות לכל הצוות.</li></ol>`)}
       ${sec('theme', 'מצב כהה', `<p>הכפתור שליד "מדריך" מחליף בין מצב בהיר, מצב כהה ומצב לפי המערכת. במצב כהה, צבע מותג כהה מדי (למשל כחול נייבי) מוצג בממשק בגרסה בהירה יותר, והאייקונים מוצגים על כרטיס בהיר כדי שהצבעים לא ייבלעו. הקבצים המיוצאים לא משתנים.</p>`)}
-      ${sec('style', 'סגנון המותג', `<ul><li><b>צבעים:</b> ראשי ומשני.</li><li><b>סגנון:</b> קו (צבע אחד), דו־טון (קו ומילוי בגוון של הצבע המשני), שני צבעים (הצורה הראשית בצבע אחד והפרטים בשני), גרדיאנט.</li>
+      ${sec('style', 'סגנון המותג', `<ul><li><b>צבעים:</b> ראשי ומשני. "⇄ החלפה" מחליף ביניהם. ב"שימוש בצבעים" אפשר לצייר את האייקונים רק בצבע הראשי או רק במשני, בלי למחוק את הצבע השני.</li><li><b>סגנון:</b> קו (צבע אחד), דו־טון (קו ומילוי בגוון של הצבע המשני), שני צבעים (הצורה הראשית בצבע אחד והפרטים בשני), גרדיאנט.</li>
         <li><b>עובי קו, קצה קו ופינות:</b> מעוגלות, חדות או חתוכות. "חדות" הופך גם את הפינות המעוגלות שבתוך האייקון לפינות אמיתיות.</li><li><b>עוצמת המילוי:</b> בדו־טון, כמה חזק הגוון. המילוי תמיד אטום, כך שהוא נראה אותו דבר עם רקע ובלי רקע.</li><li><b>מסגרת:</b> בלי, עיגול או ריבוע מעוגל בצבע לבחירה.</li></ul>`)}
       ${sec('find', 'מציאת אייקונים', `<ul><li><b>חיפוש בספרייה:</b> אפשר לחפש בעברית או באנגלית ("משלוח", "truck"). מילה שלא נמצאת במילון נשלחת ל־Claude לתרגום.</li><li><b>סינון:</b> הכל, Lucide, Tabler או Heroicons. שמות של Tabler מתחילים ב־<span class="mono">tb-</span> ושל Heroicons ב־<span class="mono">hi-</span>.</li>
         <li><b>רשימת מילים:</b> מדביקים רשימה של נושאים (למשל מהבריף), והמנוע מציע אייקון לכל מילה עם חלופות.</li></ul>`)}

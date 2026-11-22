@@ -243,6 +243,8 @@
   function hexToRgb(h) { h = (h || '#000').replace('#', ''); if (h.length === 3) h = h.split('').map((c) => c + c).join(''); const v = parseInt(h, 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
+  // Brand colour use: both colours, or only one of them (the other stays saved on the brand).
+  const effColors = (b) => (!b || !b.colorUse || b.colorUse === 'both' ? b : b.colorUse === 'primary' ? { ...b, secondary: b.primary } : { ...b, primary: b.secondary });
   const roleOf = (e) => (e && e.a && e.a['data-role']) || '';
   // Paint order: filled shapes, then second-colour lines, then the main colour on top, so accents tuck under the outline.
   const layerOf = (b, g, k) => { const e = g.els[k]; if (roleOf(e) === 'fill') return 0; if (roleOf(e) === 'accent' || (b.style === 'twotone' && k !== g.main)) return 1; return 2; };
@@ -275,6 +277,7 @@
 
   /* Static SVG at a given animation state (state null = rest). opts: size, bg (raster background color), id */
   function svgStatic(icon, b, opts = {}) {
+    b = effColors(b);
     const g = prep(icon), size = opts.size || 24, st = opts.state || null, gid = (opts.id || 'ic') + '-g';
     const cs = containerScale(b);
     let defs = '';
@@ -307,6 +310,7 @@
 
   /* Self-contained animated SVG (CSS keyframes sampled from the model). */
   function svgAnimated(icon, b, anim, opts = {}) {
+    b = effColors(b);
     if (!anim || anim.type === 'none') return svgStatic(icon, b, opts);
     const g = prep(icon), n = g.els.length, size = opts.size || 24, id = (opts.id || 'ic') + '-' + icon.n.replace(/[^a-z0-9]/g, '');
     const STEPS = 30, frames = [];
@@ -382,6 +386,7 @@
   const trDefault = () => ({ ty: 'tr', p: stat([0, 0]), a: stat([0, 0]), s: stat([100, 100]), r: stat(0), o: stat(100), sk: stat(0), sa: stat(0), nm: 'Transform' });
 
   function lottie(icon, b, anim, opts = {}) {
+    b = effColors(b);
     const g = prep(icon), n = g.els.length, W = opts.size || 512, fr = 30;
     const type = anim ? anim.type : 'none';
     const dur = type === 'none' ? 1 : anim.dur;
@@ -427,5 +432,5 @@
     return { v: '5.7.4', fr, ip: 0, op, w: W, h: W, nm: `${icon.n} · ${type}`, ddd: 0, assets: [], layers, meta: { g: 'OZ Icon Studio' } };
   }
 
-  G.IconGeo = { uncache: (n) => cache.delete(n), shapeOf, elToD, parsePath, prep, animState, ANIMS, svgStatic, svgAnimated, lottie, hexToRgb, util: { duoFill, f, esc, clamp, eOut, eInOut, eBack, containerMarkup, containerScale, rgb01, stat, animProp, trDefault } };
+  G.IconGeo = { uncache: (n) => cache.delete(n), shapeOf, elToD, parsePath, prep, animState, ANIMS, svgStatic, svgAnimated, lottie, hexToRgb, util: { effColors, duoFill, f, esc, clamp, eOut, eInOut, eBack, containerMarkup, containerScale, rgb01, stat, animProp, trDefault } };
 })(typeof window !== 'undefined' ? window : globalThis);
