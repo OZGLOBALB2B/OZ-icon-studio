@@ -69,7 +69,8 @@
     try { const f = await (await fetch('brands.json')).json(); if (Array.isArray(f) && f.length) S.brands = f; } catch (e) {}
     try {
       const l = JSON.parse(localStorage.getItem('iconstudio.brands') || 'null');
-      if (Array.isArray(l)) for (const b of l) { const i = S.brands.findIndex((x) => x.id === b.id); if (i >= 0) S.brands[i] = b; else S.brands.push(b); }
+      // A browser copy wins only when it was saved after the exported file's version.
+      if (Array.isArray(l)) for (const b of l) { const i = S.brands.findIndex((x) => x.id === b.id); if (i < 0) S.brands.push(b); else if ((b.updated || 0) > (S.brands[i].updated || 0)) S.brands[i] = b; }
     } catch (e) {}
     S.brands.sort((a, b) => (a.order || 99) - (b.order || 99));
     if (!S.brands.find((b) => b.id === S.brandId)) S.brandId = S.brands[0]?.id;
@@ -91,6 +92,7 @@
     }, (e) => { clearTimeout(timer); setSync('החברות המשותפות לא זמינות כרגע'); });
   }
   async function persistBrand(b) {
+    b = { ...b, updated: Date.now() };
     const idx = S.brands.findIndex((x) => x.id === b.id);
     if (idx >= 0) S.brands[idx] = b; else S.brands.push(b);
     if (S.db) {
@@ -149,6 +151,7 @@
           ${S.brands.length > 6 ? '<input class="text bm-q" id="bmQ" type="search" placeholder="חיפוש חברה…" aria-label="חיפוש חברה">' : ''}
           <div class="bm-list">${S.brands.map((b) => `<button class="bm-row brand-chip" role="option" data-id="${esc(b.id)}" data-name="${esc(b.name.toLowerCase())}" aria-selected="${b.id === cur.id}" aria-pressed="${b.id === cur.id}">${sw(b)}<span class="bm-name">${esc(b.name)}</span>${prev(b)}</button>`).join('')}</div>
           <button class="brand-chip add" id="addBrand">+ חברה חדשה</button>
+          <button class="brand-chip add" id="exportData" title="brands.json, brand-language.json, icons-oz.json">הורדת נתוני הסטודיו (לגיט)</button>
         </div></div>`;
     const setOpen = (v) => { brandMenuOpen = v; $('#bmPop').hidden = !v; $('#bmBtn').setAttribute('aria-expanded', v); if (v) { const q = $('#bmQ'); if (q) q.focus(); } };
     $('#bmBtn').onclick = (e) => { e.stopPropagation(); setOpen(!brandMenuOpen); };
@@ -159,6 +162,16 @@
       brandMenuOpen = false; S.brandId = el.dataset.id; S.draft = null; S.dirty = false; saveSession(); renderAll();
     });
     $('#addBrand').onclick = () => { brandMenuOpen = false; renderBrands(); openBrandDialog(null); };
+    $('#exportData').onclick = async () => {
+      brandMenuOpen = false; renderBrands();
+      try {
+        const JSZip = await loadZip(), z = new JSZip(), clean = (o) => JSON.parse(JSON.stringify(o));
+        z.file('brands.json', JSON.stringify(clean(S.brands).sort((a, b) => (a.order || 99) - (b.order || 99)), null, 2));
+        z.file('brand-language.json', JSON.stringify(clean(S.lang)));
+        z.file('icons-oz.json', JSON.stringify(S.icons.filter((x) => x.src === 'oz').map((x) => x.custom)));
+        await saveFile('oz-icon-studio-data.zip', await z.generateAsync({ type: 'blob' }));
+      } catch (e) { toast('הייצוא נכשל: ' + (e.message || e)); }
+    };
   }
   function confirmLeave() { toast('יש שינויים שלא נשמרו. שמרו או בטלו אותם קודם.'); return false; }
 
@@ -874,7 +887,14 @@ Return ONLY JSON: {"primary":"#RRGGBB","secondary":"#RRGGBB","style":"...","stro
   }
   function loadCustomIcons(db) {
     loadBrandLang(db);
-    if (!db) { try { addCustomIcons(JSON.parse(localStorage.getItem('iconstudio.custom') || '[]')); } catch (e) {} return; }
+    if (!db) {
+      fetch('icons-oz.json').then((r) => r.json()).catch(() => []).then((base) => {
+        let loc = []; try { loc = JSON.parse(localStorage.getItem('iconstudio.custom') || '[]') || []; } catch (e) {}
+        const m = new Map(); for (const d of [...(Array.isArray(base) ? base : []), ...loc]) if (d && d.n && Array.isArray(d.e)) m.set(d.n, d);
+        addCustomIcons([...m.values()].sort((a, b) => (b.created || 0) - (a.created || 0)));
+      });
+      return;
+    }
     db.collection('icons').onSnapshot((snap) => {
       addCustomIcons(snap.docs.map((d) => d.data()).filter((d) => d && d.n && Array.isArray(d.e)).sort((a, b) => (b.created || 0) - (a.created || 0)));
     }, () => {});
@@ -1079,7 +1099,13 @@ Return ONLY JSON: {"options":[{"name":"...","idea":"short Hebrew sentence","tags
   // ---------- brand icon language (studio samples per brand) ----------
   S.lang = {};
   function loadBrandLang(db) {
-    if (!db) { try { S.lang = JSON.parse(localStorage.getItem('iconstudio.lang') || '{}') || {}; } catch (e) {} return; }
+    if (!db) {
+      fetch('brand-language.json').then((r) => r.json()).catch(() => ({})).then((base) => {
+        let loc = {}; try { loc = JSON.parse(localStorage.getItem('iconstudio.lang') || '{}') || {}; } catch (e) {}
+        S.lang = { ...(base && typeof base === 'object' ? base : {}), ...loc }; renderBrandPanel();
+      });
+      return;
+    }
     db.collection('brandIcons').onSnapshot((snap) => { const m = {}; snap.docs.forEach((d) => { m[d.id] = d.data(); }); S.lang = m; renderBrandPanel(); if ($('#langGrid')) renderLangSamples(); }, () => {});
   }
   const langOf = (b) => (b && S.lang[b.id]) || null;

@@ -1,6 +1,6 @@
 [
   {
-    "cap": "round",
+    "cap": "butt",
     "container": "none",
     "containerColor": "#E3F5F7",
     "fillOpacity": 0.35,
@@ -12,8 +12,8 @@
     "primary": "#202657",
     "secondary": "#34B8C5",
     "source": "Brand tokens from the Atlantium site: navy #202657, aqua #34B8C5.",
-    "stroke": 1.5,
-    "style": "duotone"
+    "stroke": 1,
+    "style": "twotone"
   },
   {
     "cap": "round",
@@ -26,10 +26,10 @@
     "name": "Cust2Mate",
     "notes": "",
     "order": 2,
-    "primary": "#412AE8",
+    "primary": "#ED4E1A",
     "secondary": "#F29DFF",
     "source": "Cust2Mate-Website-2026, Design System Colors (1005:626): Indigo #412AE8 base, ramp #EDE9FD…#3520BA; Pink #F29DFF (used for CTAs, gradients). Confirms preset.",
-    "stroke": 2,
+    "stroke": 1,
     "style": "gradient"
   },
   {
