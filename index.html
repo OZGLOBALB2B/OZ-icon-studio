@@ -160,7 +160,56 @@ dialog.guide{width:min(820px,94vw)}
 #themeBtn svg{display:none}
 #themeBtn[data-mode="auto"] .t-auto,#themeBtn[data-mode="light"] .t-light,#themeBtn[data-mode="dark"] .t-dark{display:block}
 .icon-only{padding-inline:8px}
-.gen-opts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.st-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:-4px 0 0;flex-wrap:wrap}
+.st-tabs button{border:0;background:none;padding:8px 12px;font-weight:600;font-size:14px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.st-tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.st-pane{display:flex;flex-direction:column;gap:12px}
+.st-sub{margin:0}
+#genDlg .dlg{max-height:90vh;overflow:auto}
+.lang-card{border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;margin:0 0 16px}
+.lang-card>div:first-child{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.lang-strip{display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:#fff;border-radius:8px;padding:6px}
+.lang-strip svg{display:block}
+.lang-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:8px}
+.lang-s{position:relative;border:1px solid var(--line);border-radius:10px;background:#fff;color:#16171C;padding:10px 4px 6px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.lang-s span{font-size:10px;color:#6B6C74;direction:ltr;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lang-s .tix{opacity:1}
+.lang-rules ul{margin:6px 0 0;padding-inline-start:18px}
+.lang-rules li{margin:2px 0}
+.lang-pair{display:inline-flex;align-items:center;gap:4px;background:#fff;color:#16171C;border:1px solid var(--line);border-radius:8px;padding:4px 6px}
+.lang-pair i{font-style:normal;color:#6B6C74}
+.lang-pair svg{display:block}
+.lang-prof{border-top:1px solid var(--line);padding-top:10px;font-size:13px;line-height:1.55}
+.ad-pick{display:flex;flex-direction:column;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px}
+.ad-t[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
+#adChips .tix{opacity:1}
+.lang-sw{width:14px;height:14px;border-radius:50%;display:inline-block;border:1px solid var(--line)}
+.ad-list{display:flex;flex-direction:column;gap:8px}
+.ad-focus{border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;position:sticky;top:0;z-index:2;background:var(--surface)}
+.cmp{display:flex;align-items:center;justify-content:center;gap:16px}
+.cmp-big{margin:0;display:flex;flex-direction:column;align-items:center;gap:6px}
+.cmp-plate{width:232px;height:232px;border-radius:12px;display:grid;place-items:center;background:
+  linear-gradient(var(--icsoft) 1px,transparent 1px) 0 0/29px 29px,linear-gradient(90deg,var(--icsoft) 1px,transparent 1px) 0 0/29px 29px,var(--icbg);border:1px solid var(--line)}
+.cmp-big figcaption{font-size:12px;color:var(--muted)}
+.cmp-row{display:flex;justify-content:center;gap:56px}
+.cmp-sizes{display:flex;align-items:flex-end;gap:12px;background:var(--icbg);border-radius:10px;padding:8px 12px}
+.cmp-sizes span{display:flex;flex-direction:column;align-items:center;gap:2px}
+.cmp-sizes small{font-size:10px;color:var(--icink)}
+@media (max-width:640px){.cmp-plate{width:150px;height:150px}.cmp-plate svg{width:130px;height:130px}.cmp-row{gap:16px}}
+.ad-row{cursor:pointer}
+.ad-act{display:flex;flex-direction:column;align-items:flex-end;gap:6px;min-width:96px}
+.ad-ok{display:flex;flex-direction:column;align-items:flex-end;font-size:12px;font-weight:600;color:var(--ok)}
+.ad-ok small{font-weight:400;color:var(--muted)}
+.ad-foot{position:sticky;bottom:-22px;z-index:3;display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--surface);border-top:1px solid var(--line);padding:10px 0 12px}
+.ad-row[aria-current="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.ad-row{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:8px}
+.ad-src{display:flex;flex-direction:column;align-items:center;gap:2px;background:var(--icbg);border-radius:8px;padding:6px;min-width:76px}
+.ad-src span{font-size:10px;color:var(--icink);direction:ltr}
+.ad-arrow{color:var(--muted);font-size:18px}
+.ad-opts{display:flex;gap:8px;flex-wrap:wrap;flex:1}
+.ad-opts .gen-opt{padding:8px}
+.gen-opts{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+@media (min-width:900px){.gen-opts{grid-template-columns:repeat(4,1fr)}}
 @media (max-width:640px){.gen-opts{grid-template-columns:repeat(2,1fr)}}
 .gen-opt{border:1px solid var(--line);background:var(--icbg);border-radius:12px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer}
 .gen-opt>*{pointer-events:none}
@@ -231,7 +280,7 @@ dialog.guide{width:min(820px,94vw)}
         <input id="q" type="search" placeholder="חיפוש בעברית או באנגלית: מים, גרף, מגן, truck…" autocomplete="off" aria-label="חיפוש אייקון"></label>
       <span class="count" id="count"></span>
       <div class="seg" id="libSeg" role="group" aria-label="ספריית אייקונים"><button data-lib="all" aria-pressed="true">הכל</button><button data-lib="lu" aria-pressed="false">Lucide</button><button data-lib="tb" aria-pressed="false">Tabler</button><button data-lib="hi" aria-pressed="false">Heroicons</button><button data-lib="oz" aria-pressed="false">OZ</button></div>
-      <button class="btn small primary" id="genBtn">✦ יצירת אייקון</button>
+      <button class="btn small primary" id="genBtn">✦ סטודיו אייקונים</button>
     </div>
     <div class="grid" id="grid" role="list"></div>
     <div class="words" id="words" hidden>
@@ -253,6 +302,7 @@ dialog.guide{width:min(820px,94vw)}
 <dialog id="setDlg"></dialog>
 <dialog id="guideDlg" class="guide"></dialog>
 <dialog id="genDlg" class="guide"></dialog>
+
 <dialog id="copyDlg"></dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 

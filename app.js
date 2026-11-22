@@ -873,6 +873,7 @@ Return ONLY JSON: {"primary":"#RRGGBB","secondary":"#RRGGBB","style":"...","stro
     renderGrid(); renderTray();
   }
   function loadCustomIcons(db) {
+    loadBrandLang(db);
     if (!db) { try { addCustomIcons(JSON.parse(localStorage.getItem('iconstudio.custom') || '[]')); } catch (e) {} return; }
     db.collection('icons').onSnapshot((snap) => {
       addCustomIcons(snap.docs.map((d) => d.data()).filter((d) => d && d.n && Array.isArray(d.e)).sort((a, b) => (b.created || 0) - (a.created || 0)));
@@ -897,6 +898,7 @@ Return ONLY JSON: {"primary":"#RRGGBB","secondary":"#RRGGBB","style":"...","stro
         const v = String(a[key]).trim();
         if (key === 'd' ? /^[MmLlHhVvCcSsQqTtAaZz0-9.,\s+\-eE]+$/.test(v) : key === 'points' ? /^[0-9.,\s+\-]+$/.test(v) : /^-?[0-9.]+$/.test(v)) out[key] = v;
       }
+      const role = a['data-role'] || a.role; if (role === 'accent' || role === 'fill') out['data-role'] = role;
       if (Object.keys(out).length) e.push([tag, out]);
     }
     if (!e.length) return null;
@@ -943,8 +945,9 @@ Return ONLY JSON: {"primary":"#RRGGBB","secondary":"#RRGGBB","style":"...","stro
   }
   function genPrompt(desc, refine) {
     const close = GEN.mode === 'close' && (GEN.images.length || GEN.refs.length);
+    const L = langOf(brand()), lang = L && L.samples.length >= 2 ? langBlock(brand(), L) + '\nThe new icon must belong to this family.\nYou may use "data-role":"accent" (second colour) or "data-role":"fill" on elements, as the samples do.\n' : '';
     const ex = (GEN.refs.length ? GEN.refs : ['droplet', 'shield-check', 'truck', 'chart-line']).map((n) => icon(n)).filter(Boolean).map((ic) => JSON.stringify({ name: ic.b, elements: ic.e }));
-    return `You design icons in the exact geometric language of the Lucide icon set.
+    return `${lang}You design icons ${lang ? 'for the brand family above, on the geometric grid' : 'in the exact geometric language'} of the Lucide icon set.
 Rules for every icon:
 - 24x24 grid, drawn as STROKES ONLY (no fills): the app applies stroke width 2, round caps and joins, and its own colours.
 - Keep all geometry inside x,y 2..22. Use whole or half units. Corner radius 2 on rectangles, small arcs for rounded turns.
@@ -969,8 +972,8 @@ Return ONLY JSON: {"plan":"short text","options":[{"name":"kebab-case-english-na
   function renderGenOptions() {
     const box = $('#genOpts'); if (!box) return; const b = brand();
     box.innerHTML = GEN.options.map((ic, i) => `<button class="gen-opt" data-gi="${i}" aria-pressed="${GEN.picked === i}" title="${esc(ic.name)}">
-        <span class="gen-prev">${G.svgStatic(ic, b, { size: 72, id: 'go' + i })}</span>
-        <span class="gen-sm">${G.svgStatic(ic, b, { size: 20, id: 'gs' + i })}${G.svgStatic(ic, neutral, { size: 20, id: 'gn' + i })}</span>
+        <span class="gen-prev">${G.svgStatic(ic, b, { size: 128, id: 'go' + i })}</span>
+        <span class="gen-sm">${G.svgStatic(ic, b, { size: 16, id: 'gs' + i })}${G.svgStatic(ic, b, { size: 24, id: 'gt' + i })}${G.svgStatic(ic, neutral, { size: 24, id: 'gn' + i })}</span>
         <span class="gen-idea">${esc(ic.idea || ic.name)}</span></button>`).join('');
     $$('[data-gi]', box).forEach((x) => x.onclick = () => { GEN.picked = +x.dataset.gi; renderGenOptions(); renderGenPick(); });
   }
@@ -988,7 +991,8 @@ Return ONLY JSON: {"plan":"short text","options":[{"name":"kebab-case-english-na
     st.textContent = refine ? 'Claude משפר את האייקון…' : GEN.check && GEN.images.length && GEN.mode === 'close' ? 'שלב 1 מתוך 2: Claude קורא את הרפרנס ומשרטט 4 אפשרויות…' : 'Claude מעצב 4 אפשרויות…';
     try {
       const refImgs = GEN.images.map((x) => x.grid || x.blob);
-      const r = await sample.json(genPrompt(desc, refine), { modelTier: 'complex', ...(refImgs.length ? { images: refImgs } : {}) });
+      const Lg = langOf(brand()), langImgs = Lg && Lg.samples.length >= 2 ? [await samplesSheet(Lg.samples)] : [];
+      const r = await sample.json(genPrompt(desc, refine), { modelTier: 'complex', ...(refImgs.length || langImgs.length ? { images: [...refImgs, ...langImgs] } : {}) });
       let opts = (r && Array.isArray(r.options) ? r.options : []).map((o, k) => cleanIcon(o, k)).filter(Boolean);
       if (!opts.length) throw new Error('לא התקבלו אייקונים תקינים');
       if (GEN.check && refImgs.length && GEN.mode === 'close') {
@@ -1025,9 +1029,9 @@ Return ONLY JSON: {"options":[{"name":"...","idea":"short Hebrew sentence","tags
     el.innerHTML = GEN.images.map((x, i) => `<span class="gen-img"><img src="${x.url}" alt="השראה ${i + 1}"><button class="tix" data-gim="${i}" aria-label="הסרת תמונה">×</button></span>`).join('');
     $$('[data-gim]', el).forEach((x) => x.onclick = () => { GEN.images.splice(+x.dataset.gim, 1); renderGenImages(); });
   }
-  function openGen() {
-    const d = $('#genDlg');
-    d.innerHTML = `<div class="dlg"><div class="dlghead"><div><h2 style="margin:0">יצירת אייקון מתיאור</h2><h3>Claude מעצב אפשרויות בשפה של ספריית האייקונים, והאייקון שבוחרים נשמר במאגר</h3></div><button class="btn ghost" data-close>סגירה</button></div>
+  function paneGen() {
+    const d = $('#stBody');
+    d.innerHTML = `<div class="st-pane"><p class="status st-sub">${langOf(brand()) && langOf(brand()).samples.length >= 2 ? `Claude מעצב בשפת האייקונים של ${esc(brand().name)}, לפי הדוגמאות של הסטודיו` : 'Claude מעצב אפשרויות בשפה של ספריית האייקונים. כדי לעצב בשפת המותג, הוסיפו דוגמאות של אייקוני הסטודיו בחלונית המותג'}</p>
       <div class="field" style="margin:0"><label for="genDesc">מה האייקון צריך להראות?</label><textarea class="text" id="genDesc" rows="2" placeholder="למשל: מנורת UV שמטהרת טיפת מים, או משאית קירור עם פתית שלג">${esc($('#genDesc')?.value || '')}</textarea></div>
       <div class="grid2">
         <div class="field" style="margin:0"><span class="lbl">תמונות השראה (לא חובה)</span><div class="row" style="gap:6px;flex-wrap:wrap"><span id="genImgs" class="row" style="gap:6px;flex-wrap:wrap"></span><label class="btn small">+ העלאת תמונה<input type="file" id="genFile" accept="image/*" multiple hidden></label></div></div>
@@ -1048,7 +1052,6 @@ Return ONLY JSON: {"options":[{"name":"...","idea":"short Hebrew sentence","tags
         <div class="row" style="flex-wrap:wrap"><button class="btn primary" id="genSave">שמירה במאגר</button><label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="genToSet" checked> להוסיף גם לסט שלי</label></div>
         <div class="row" style="flex-wrap:wrap"><input class="text" id="genFeedback" placeholder="מה לשפר? למשל: קו נקי יותר, טיפה גדולה יותר, בלי הקרניים" style="flex:1;min-width:200px"><button class="btn" id="genRefine">שיפור האפשרות הזו</button></div>
       </div></div>`;
-    d.querySelector('[data-close]').onclick = () => d.close();
     $('#genFile').onchange = async (e) => { for (const f of [...e.target.files].slice(0, 4 - GEN.images.length)) { try { GEN.images.push(await shrinkImage(f)); } catch (err) {} } e.target.value = ''; renderGenImages(); };
     $('#genGo').onclick = () => runGen(null);
     $$('.seg[data-k="gmode"] button', d).forEach((x) => x.onclick = () => { GEN.mode = x.dataset.v; $$('.seg[data-k="gmode"] button', d).forEach((y) => y.setAttribute('aria-pressed', y === x)); });
@@ -1070,16 +1073,453 @@ Return ONLY JSON: {"options":[{"name":"...","idea":"short Hebrew sentence","tags
       $('#genSave').disabled = false;
     };
     renderGenImages(); renderGenRefs(); renderGenOptions(); renderGenPick();
-    d.showModal();
   }
-  $('#genBtn').onclick = openGen;
+
+
+  // ---------- brand icon language (studio samples per brand) ----------
+  S.lang = {};
+  function loadBrandLang(db) {
+    if (!db) { try { S.lang = JSON.parse(localStorage.getItem('iconstudio.lang') || '{}') || {}; } catch (e) {} return; }
+    db.collection('brandIcons').onSnapshot((snap) => { const m = {}; snap.docs.forEach((d) => { m[d.id] = d.data(); }); S.lang = m; renderBrandPanel(); if ($('#langGrid')) renderLangSamples(); }, () => {});
+  }
+  const langOf = (b) => (b && S.lang[b.id]) || null;
+  async function saveLang(id, doc) {
+    S.lang[id] = doc;
+    if (S.db) { await S.db.collection('brandIcons').doc(id).set(doc); return; }
+    try { localStorage.setItem('iconstudio.lang', JSON.stringify(S.lang)); } catch (e) {}
+  }
+  // Keep only drawing elements and presentation attributes from an uploaded SVG; returns a clean SVG string plus measurements.
+  const SVG_TAGS = new Set(['g', 'path', 'circle', 'ellipse', 'rect', 'line', 'polyline', 'polygon']);
+  const GEO_ATTRS = ['d', 'cx', 'cy', 'r', 'rx', 'ry', 'x', 'y', 'width', 'height', 'x1', 'y1', 'x2', 'y2', 'points'];
+  const PAINT = ['fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit', 'fill-opacity', 'stroke-opacity', 'opacity', 'fill-rule', 'clip-rule'];
+  const okColor = (v) => /^(none|currentColor|#[0-9a-f]{3,8}|rgba?\([0-9.,\s%]+\))$/i.test(v);
+  const okNum = (v) => /^-?[0-9.]+(e-?\d+)?(px)?$/i.test(v);
+  function sanitizeSvg(text) {
+    const doc = new DOMParser().parseFromString(text, 'image/svg+xml'), root = doc.documentElement;
+    if (!root || root.nodeName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) return null;
+    let vb = (root.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+    if (vb.length !== 4 || vb.some((v) => !isFinite(v)) || vb[2] <= 0) { const w = parseFloat(root.getAttribute('width')) || 24, h = parseFloat(root.getAttribute('height')) || 24; vb = [0, 0, w, h]; }
+    const scale = 24 / Math.max(vb[2], vb[3]), stats = { sw: [], caps: {}, joins: {}, filled: 0, stroked: 0, colors: {}, shapes: 0, gradient: 0, grads: [] };
+    const decl = (txt) => { const m = {}; for (const part of String(txt || '').split(';')) { const k = part.slice(0, part.indexOf(':')).trim().toLowerCase(), v = part.slice(part.indexOf(':') + 1).trim(); if (part.includes(':') && k && v) m[k] = v; } return m; };
+    // CSS classes from <style> (Illustrator exports: .cls-1{fill:none;stroke:url(#linear-gradient)})
+    const classes = {};
+    for (const st of doc.querySelectorAll('style')) for (const m of st.textContent.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const d = decl(m[2]);
+      for (const sel of m[1].split(',')) { const c = sel.trim().match(/^\.([\w-]+)$/); if (c) classes[c[1]] = { ...(classes[c[1]] || {}), ...d }; }
+    }
+    // Gradients, kept with fresh ids so many samples can sit on one page.
+    const sfx = Math.random().toString(36).slice(2, 7), gmap = {};
+    const grads = [...doc.querySelectorAll('linearGradient, radialGradient')];
+    grads.forEach((g) => { const id = g.getAttribute('id'); if (id && /^[\w.-]+$/.test(id)) gmap[id] = `${id.replace(/[^\w-]/g, '')}-${sfx}`; });
+    const okNumList = (v) => /^[0-9.,\s+\-eE%]+$/.test(v);
+    const gradDefs = grads.map((g) => {
+      const id = gmap[g.getAttribute('id')]; if (!id) return '';
+      const tag = g.nodeName.replace(/^.*:/, ''), at = [`id="${id}"`];
+      for (const k of ['x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'fx', 'fy']) { const v = g.getAttribute(k); if (v != null && okNumList(v)) at.push(`${k}="${v}"`); }
+      const gu = g.getAttribute('gradientUnits'); if (gu === 'userSpaceOnUse' || gu === 'objectBoundingBox') at.push(`gradientUnits="${gu}"`);
+      const gt = g.getAttribute('gradientTransform'); if (gt && /^[a-z0-9.,\s()+\-eE]+$/i.test(gt)) at.push(`gradientTransform="${gt}"`);
+      const href = (g.getAttribute('href') || g.getAttribute('xlink:href') || '').replace(/^#/, ''); if (gmap[href]) at.push(`href="#${gmap[href]}"`);
+      const stopCols = [...g.querySelectorAll('stop')].map((sp) => (decl(sp.getAttribute('style'))['stop-color'] || sp.getAttribute('stop-color') || '')).filter(okColor);
+      if (stopCols.length >= 2) stats.grads.push([stopCols[0], stopCols[stopCols.length - 1]]);
+      const stops = [...g.querySelectorAll('stop')].map((sp) => { const sd = decl(sp.getAttribute('style')); const col = sd['stop-color'] || sp.getAttribute('stop-color') || '#000', op = sd['stop-opacity'] || sp.getAttribute('stop-opacity'), off = sp.getAttribute('offset') || '0';
+        return okColor(col) && okNumList(off) ? `<stop offset="${off}" stop-color="${col}"${op && okNum(op) ? ` stop-opacity="${op}"` : ''}/>` : ''; }).join('');
+      return `<${tag} ${at.join(' ')}>${stops}</${tag}>`;
+    }).join('');
+    const okPaint = (v) => okColor(v) || /^url\(\s*['"]?#([\w.-]+)['"]?\s*\)$/.test(v);
+    const fixPaint = (v) => { const m = v.match(/^url\(\s*['"]?#([\w.-]+)['"]?\s*\)$/); return m ? (gmap[m[1]] ? `url(#${gmap[m[1]]})` : null) : v; };
+    const isWhite = (v) => /^(#fff|#ffffff|white|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))$/i.test(String(v || '').trim());
+    const paintOf = (el) => { const m = {}; for (const c of (el.getAttribute('class') || '').split(/\s+/)) if (classes[c]) Object.assign(m, classes[c]); const attrs = {}; for (const k of PAINT) { const v = el.getAttribute(k); if (v != null) attrs[k] = v; } return { ...attrs, ...m, ...decl(el.getAttribute('style')) }; };
+    // How much a transform enlarges strokes (so stroke width is measured as drawn).
+    const tScale = (tf) => { let k = 1; for (const m of String(tf || '').matchAll(/(matrix|scale)\(([^)]*)\)/g)) { const n = m[2].split(/[\s,]+/).map(Number); k *= m[1] === 'matrix' ? Math.sqrt(Math.abs(n[0] * n[3] - n[1] * n[2])) || 1 : Math.sqrt(Math.abs(n[0] * (n[1] ?? n[0]))) || 1; } return k; };
+    const walk = (el, inh, ks = 1) => {
+      const tag = el.nodeName.toLowerCase(); if (!SVG_TAGS.has(tag)) return '';
+      const st = paintOf(el), at = {}, cur = { ...inh }; ks *= tScale(el.getAttribute('transform'));
+      for (const k of PAINT) {
+        let v = String(st[k] ?? '').trim(); if (!v) continue;
+        if (k === 'fill' || k === 'stroke') { if (!okPaint(v)) continue; v = fixPaint(v); if (!v) continue; }
+        else if (/linecap|linejoin|rule/.test(k)) { if (!/^[a-z-]+$/.test(v)) continue; }
+        else if (!okNum(v)) continue;
+        at[k] = v.replace(/px$/, ''); cur[k] = at[k];
+      }
+      if (tag !== 'g') for (const k of GEO_ATTRS) { const v = el.getAttribute(k); if (v == null) continue; if (k === 'd' ? /^[MmLlHhVvCcSsQqTtAaZz0-9.,\s+\-eE]+$/.test(v) : k === 'points' ? /^[0-9.,\s+\-eE]+$/.test(v) : okNum(v)) at[k] = v; }
+      const tf = el.getAttribute('transform'); if (tf && /^[a-z0-9.,\s()+\-eE]+$/i.test(tf)) at.transform = tf;
+      if (tag === 'g') { const inner = [...el.children].map((c) => walk(c, cur, ks)).join(''); return inner ? `<g ${Object.entries(at).map(([k, v]) => `${k}="${v}"`).join(' ')}>${inner}</g>` : ''; }
+      const fill = cur.fill ?? '#000', stroke = cur.stroke ?? 'none';
+      if (isWhite(fill) && stroke === 'none') return ''; // artboard / card backgrounds
+      stats.shapes++;
+      if (stroke !== 'none') { stats.stroked++; stats.sw.push((parseFloat(cur['stroke-width'] ?? 1)) * scale * ks); const cp = cur['stroke-linecap'] || 'butt', jn = cur['stroke-linejoin'] || 'miter'; stats.caps[cp] = (stats.caps[cp] || 0) + 1; stats.joins[jn] = (stats.joins[jn] || 0) + 1; if (stroke.startsWith('url(')) stats.gradient++; else stats.colors[stroke] = (stats.colors[stroke] || 0) + 1; }
+      if (fill !== 'none') { stats.filled++; if (fill.startsWith('url(')) stats.gradient++; else stats.colors[fill] = (stats.colors[fill] || 0) + 1; }
+      return `<${tag} ${Object.entries(at).map(([k, v]) => `${k}="${v}"`).join(' ')}/>`;
+    };
+    const rootPaint = {}; const rp = paintOf(root);
+    for (const k of PAINT) { let v = String(rp[k] ?? '').trim(); if (!v) continue; if (k === 'fill' || k === 'stroke') { if (!okPaint(v)) continue; v = fixPaint(v); if (!v) continue; } else if (/linecap|linejoin|rule/.test(k) ? !/^[a-z-]+$/.test(v) : !okNum(v)) continue; rootPaint[k] = v; }
+    const body = [...root.children].map((c) => walk(c, rootPaint)).join('');
+    if (!body) return null;
+    const ra = Object.entries(rootPaint).map(([k, v]) => `${k}="${v}"`).join(' ');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.join(' ')}"${ra ? ' ' + ra : ''}>${gradDefs ? `<defs>${gradDefs}</defs>` : ''}${body}</svg>`;
+    return { svg, stats };
+  }
+
+  // Bake transforms and the viewBox into plain 24-grid paths, and mark accent strokes and filled shapes,
+  // so the samples look exactly like the format Claude has to answer in.
+  function normalizeSample(svg) {
+    const host = document.createElement('div'); host.style.cssText = 'position:absolute;left:-10000px;top:0;width:480px;height:480px;visibility:hidden';
+    host.innerHTML = svg; document.body.appendChild(host);
+    try {
+      const root = host.querySelector('svg'); root.setAttribute('width', '480'); root.setAttribute('height', '480');
+      const vb = root.getAttribute('viewBox').split(/[\s,]+/).map(Number), sc = 24 / Math.max(vb[2], vb[3]);
+      const ox = (24 - vb[2] * sc) / 2, oy = (24 - vb[3] * sc) / 2, inv = root.getScreenCTM().inverse();
+      const shapes = [...root.querySelectorAll('path,circle,ellipse,rect,line,polyline,polygon')];
+      const paint = shapes.map((el) => { const cs = getComputedStyle(el); return { stroke: cs.stroke, fill: cs.fill, sw: parseFloat(cs.strokeWidth) || 0 }; });
+      const strokes = {}; paint.forEach((p) => { if (p.stroke && p.stroke !== 'none') strokes[p.stroke] = (strokes[p.stroke] || 0) + 1; });
+      const main = Object.entries(strokes).sort((a, c) => c[1] - a[1])[0]?.[0];
+      const out = [];
+      shapes.slice(0, 18).forEach((el, k) => {
+        const tag = el.nodeName.toLowerCase(), a = {}; for (const at of el.attributes) a[at.name] = at.value;
+        let subs; try { subs = G.parsePath(G.elToD(tag, a)); } catch (e) { return; }
+        const m = inv.multiply(el.getScreenCTM());
+        const T = (p) => [ (m.a * p[0] + m.c * p[1] + m.e - vb[0]) * sc + ox, (m.b * p[0] + m.d * p[1] + m.f - vb[1]) * sc + oy ];
+        const r = (v) => +v.toFixed(2), P = (p) => r(p[0]) + ' ' + r(p[1]), same = (p, q) => Math.abs(p[0] - q[0]) < 1e-6 && Math.abs(p[1] - q[1]) < 1e-6;
+        let d = '';
+        for (const sp of subs) {
+          let prev = sp.start; d += 'M' + P(T(prev));
+          for (const q of sp.segs) { d += same(q.c1, prev) && same(q.c2, q.p) ? 'L' + P(T(q.p)) : 'C' + P(T(q.c1)) + ' ' + P(T(q.c2)) + ' ' + P(T(q.p)); prev = q.p; }
+          if (sp.closed) d += 'Z';
+        }
+        if (!d) return;
+        const p = paint[k], attrs = { d };
+        if ((!p.stroke || p.stroke === 'none') && p.fill && p.fill !== 'none') attrs['data-role'] = 'fill';
+        else if (main && p.stroke !== main && !String(p.stroke).startsWith('url')) attrs['data-role'] = 'accent';
+        out.push(['path', attrs]);
+      });
+      return out;
+    } catch (e) { return null; } finally { host.remove(); }
+  }
+  // Every inline copy gets its own gradient ids: a url(#id) that resolves to a copy inside a hidden dialog draws nothing.
+  let svgUid = 0;
+  const withSize = (svg, n) => { const u = 'u' + (++svgUid).toString(36); return svg.replace(/\bid="([\w.-]+)"/g, `id="$1-${u}"`).replace(/url\(#([\w.-]+)\)/g, `url(#$1-${u})`).replace(/href="#([\w.-]+)"/g, `href="#$1-${u}"`).replace('<svg ', `<svg width="${n}" height="${n}" `); };
+  const hex6 = (c) => { c = String(c || '').trim(); let m = c.match(/^#([0-9a-f]{3})$/i); if (m) return '#' + m[1].split('').map((x) => x + x).join('').toUpperCase(); m = c.match(/^#([0-9a-f]{6})/i); if (m) return '#' + m[1].toUpperCase(); m = c.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i); if (m) return '#' + [m[1], m[2], m[3]].map((x) => (+x).toString(16).padStart(2, '0')).join('').toUpperCase(); return null; };
+  function measureLang(samples) {
+    const all = { sw: [], caps: {}, joins: {}, filled: 0, stroked: 0, colors: {}, shapes: 0, gradient: 0, grads: {} };
+    for (const x of samples) { const r = sanitizeSvg(x.svg); if (!r) continue; const t = r.stats; all.sw.push(...t.sw); all.filled += t.filled; all.stroked += t.stroked; all.shapes += t.shapes; all.gradient += t.gradient || 0; for (const [a, c] of t.grads || []) { const k = hex6(a) + '>' + hex6(c); if (k !== 'null>null') all.grads[k] = (all.grads[k] || 0) + 1; } for (const k of ['caps', 'joins', 'colors']) for (const [a, c] of Object.entries(t[k])) all[k][a] = (all[k][a] || 0) + c; }
+    const top = (o) => Object.entries(o).sort((a, b) => b[1] - a[1])[0]?.[0];
+    const sw = all.sw.sort((a, b) => a - b)[Math.floor(all.sw.length / 2)];
+    return { stroke: sw ? Math.round(sw * 4) / 4 : null, cap: top(all.caps) || null, join: top(all.joins) || null, colors: Object.entries(all.colors).sort((a, b) => b[1] - a[1]).slice(0, 4).map((x) => x[0]), fillShare: all.shapes ? all.filled / all.shapes : 0, gradient: all.gradient > 0,
+      gradPair: (Object.entries(all.grads).sort((a, b) => b[1] - a[1])[0] || [null])[0], solid: Object.entries(all.colors).map(([c, n]) => [hex6(c), n]).filter(([c]) => c && c !== '#FFFFFF').sort((a, b) => b[1] - a[1]).map((x) => x[0]), perIcon: samples.length ? all.shapes / samples.length : 0 };
+  }
+  async function samplesSheet(samples, n = 16) {
+    const list = samples.slice(0, n), cols = Math.min(4, list.length), rows = Math.ceil(list.length / cols), C = 200;
+    const c = document.createElement('canvas'); c.width = cols * C; c.height = rows * C; const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    for (let i = 0; i < list.length; i++) { try { const im = await svgImage(withSize(list[i].svg, 160)); ctx.drawImage(im, (i % cols) * C + 20, Math.floor(i / cols) * C + 20, 160, 160); } catch (e) {} }
+    return new Promise((r) => c.toBlob(r, 'image/png'));
+  }
+  const langCode = (samples, n = 10) => samples.slice(0, n).map((x) => `${x.name}: ${x.svg.slice(0, 1400)}`).join('\n');
+  function langBlock(b, L) {
+    const p = L.profile || {}, norm = L.samples.filter((x) => x.norm && x.norm.length);
+    const rules = (p.rules || []).map((x) => '- ' + (x.en || x)).join('\n');
+    const pairs = (p.pairs || []).map((pr) => ({ lib: icon(pr.lib), smp: L.samples[pr.i] })).filter((x) => x.lib && x.smp && x.smp.norm).slice(0, 6);
+    return `BRAND ICON LANGUAGE for "${b.name}": icons the studio drew for this brand. Every new icon must look like it was drawn by the same hand.
+${L.designer ? `DESIGNER NOTES (highest priority, written by the brand's designer): ${L.designer}\n` : ''}${rules ? `LANGUAGE RULES (measured from the samples; follow them strictly):\n${rules}\n` : p.notes ? `Style notes: ${p.notes}\n` : ''}
+STUDIO SAMPLES, already converted to the exact 24x24 element format you must answer in ("data-role":"accent" = second colour, "fill" = filled shape):
+${(norm.length ? norm.slice(0, 12).map((x, i) => `${(p.subjects && p.subjects[L.samples.indexOf(x)]) || x.name}: ${JSON.stringify(x.norm).slice(0, 1600)}`) : [langCode(L.samples)]).join('\n')}
+${pairs.length ? `\nBEFORE → AFTER: the same subject as a generic library icon and as the studio drew it. Study what changes (corners, terminals, gaps, proportions, detail, colour roles) and apply the same transformation:\n${pairs.map((x) => `LIBRARY ${x.lib.b}: ${JSON.stringify(x.lib.e).slice(0, 900)}\nSTUDIO  ${x.lib.b}: ${JSON.stringify(x.smp.norm).slice(0, 1600)}`).join('\n')}\n` : ''}`;
+  }
+
+  const langColors = (m) => (m && m.gradPair ? m.gradPair.split('>') : (m && m.solid) || []).filter(Boolean).slice(0, 2);
+  function renderLangSamples() {
+    const b = brand(), L = langOf(b) || { samples: [] }, el = $('#langGrid'); if (!el) return;
+    const tabEl = $('[data-st="samples"]'); if (tabEl) tabEl.textContent = `דוגמאות הסטודיו (${L.samples.length})`;
+    el.innerHTML = L.samples.length ? L.samples.map((x, i) => `<div class="lang-s" title="${esc(x.name)}">${withSize(x.svg, 44)}<span>${esc(x.name)}</span><button class="tix" data-lrm="${i}" aria-label="הסרת ${esc(x.name)}">×</button></div>`).join('') : '<p class="status">עדיין אין דוגמאות. העלו קובצי SVG של אייקונים שהסטודיו עיצב למותג הזה.</p>';
+    $$('[data-lrm]', el).forEach((x) => x.onclick = async () => { const nl = { ...L, samples: L.samples.filter((_, i) => i !== +x.dataset.lrm), profile: null }; await saveLang(b.id, nl); renderLangSamples(); renderBrandPanel(); });
+    const p = L.profile, pe = $('#langProfile');
+    if (pe) pe.innerHTML = p ? `<div class="lang-prof"><b>מה נמדד:</b> קו ${p.measured.stroke ?? '?'}px · קצה ${p.measured.cap ?? '?'} · פינות ${p.measured.join ?? '?'} · ${Math.round(p.measured.fillShare * 100)}% צורות מלאות${p.measured.gradient ? ' · גרדיאנט' : ''} · בערך ${p.measured.perIcon.toFixed(1)} צורות לאייקון
+        ${p.notesHe ? `<p style="margin:6px 0 0"><b>השפה לפי Claude:</b> ${esc(p.notesHe)}</p>` : ''}
+        ${p.rules && p.rules.length ? `<details class="lang-rules" open><summary><b>כללי השפה (${p.rules.length})</b></summary><ul>${p.rules.map((x) => `<li>${esc(x.he || x.en)}</li>`).join('')}</ul></details>` : ''}
+        ${p.pairs && p.pairs.length ? `<div class="field" style="margin:6px 0 0"><span class="lbl">זוגות "לפני ← אחרי" שהמנוע לומד מהם (אייקון מהספרייה ← הגרסה של הסטודיו)</span><div class="row" style="gap:10px;flex-wrap:wrap">${p.pairs.slice(0, 8).map((pr) => icon(pr.lib) && L.samples[pr.i] ? `<span class="lang-pair" title="${esc(pr.lib)}">${svgFor(pr.lib, neutral, { size: 24, id: 'lp' })}<i>←</i>${withSize(L.samples[pr.i].svg, 28)}</span>` : '').join('')}</div></div>` : ''}
+        ${langColors(p.measured).length ? `<div class="row" style="gap:6px;margin-top:6px"><b>צבעים:</b>${langColors(p.measured).map((c) => `<i class="lang-sw" style="background:${c}"></i><span class="mono">${c}</span>`).join('')}${p.measured.gradPair ? '<span class="status">(גרדיאנט)</span>' : ''}</div>` : ''}
+        <div class="row" style="margin-top:8px"><button class="btn small" id="langApply">עדכון סגנון המותג לפי הדוגמאות</button><span class="status">קו, קצה, פינות${langColors(p.measured).length ? ', צבעים' : ''}${p.style || p.measured.gradPair ? ' וסגנון' : ''}</span></div></div>` : '';
+    const dn = $('#langDesigner'); if (dn) { dn.value = L.designer || ''; $('#langDesignerSave').onclick = async () => { await saveLang(b.id, { ...L, designer: dn.value.trim().slice(0, 1200) }); toast('ההערות נשמרו ויקבלו עדיפות בכל התאמה'); }; }
+    const ap = $('#langApply'); if (ap) ap.onclick = () => { const m = p.measured, d = { ...brand() }; const cols = langColors(m); if (cols[0]) d.primary = cols[0]; if (cols[1]) d.secondary = cols[1]; if (m.gradPair) d.style = 'gradient'; if (m.stroke) d.stroke = Math.min(3, Math.max(1, m.stroke)); if (['round', 'butt', 'square'].includes(m.cap)) d.cap = m.cap; if (['round', 'miter', 'bevel'].includes(m.join)) d.join = m.join; if (!m.gradPair && p.style && ['outline', 'duotone', 'twotone', 'gradient'].includes(p.style)) d.style = p.style; S.draft = d; S.dirty = true; renderAll(); toast('הסגנון עודכן. לחצו "שמירה" בחלונית המותג כדי לשמור.'); };
+  }
+  // A sheet SVG with many icons (Figma export of a frame, a sprite with <symbol>s) → one clean SVG per icon.
+  function splitSheet(text) {
+    let raw; try { raw = new DOMParser().parseFromString(text, 'image/svg+xml'); } catch (e) { return null; }
+    const syms = [...raw.querySelectorAll('symbol')];
+    if (syms.length >= 2) return syms.map((sy) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${sy.getAttribute('viewBox') || '0 0 24 24'}" ${[...sy.attributes].filter((x) => PAINT.includes(x.name) || x.name === 'style').map((x) => `${x.name}="${x.value.replace(/"/g, '')}"`).join(' ')}>${sy.innerHTML}</svg>`);
+    const clean = sanitizeSvg(text); if (!clean) return null;
+    const host = document.createElement('div'); host.style.cssText = 'position:absolute;left:-10000px;top:0;width:2000px;height:2000px;visibility:hidden';
+    host.innerHTML = clean.svg; document.body.appendChild(host);
+    try {
+      const root = host.querySelector('svg'); root.setAttribute('width', '2000'); root.setAttribute('height', '2000');
+      const vb = root.getAttribute('viewBox').split(' ').map(Number), area = vb[2] * vb[3];
+      // Walk down single-child wrappers, remembering their attributes so each icon keeps inherited stroke/fill.
+      let level = root; const wrap = [];
+      const kids = (el) => [...el.children].filter((c) => c.nodeName.toLowerCase() !== 'defs');
+      while (kids(level).length === 1 && kids(level)[0].nodeName.toLowerCase() === 'g') { level = kids(level)[0]; wrap.push([...level.attributes].map((a) => `${a.name}="${a.value}"`).join(' ')); }
+      const box = (el) => { try { const g = document.createElementNS('http://www.w3.org/2000/svg', 'g'); el.parentNode.insertBefore(g, el); g.appendChild(el); const r = g.getBBox(); g.parentNode.insertBefore(el, g); g.remove(); return r.width || r.height ? { x: r.x, y: r.y, w: r.width, h: r.height } : null; } catch (e) { return null; } };
+      const defsHtml = (root.querySelector('defs') || { outerHTML: '' }).outerHTML;
+      let items = [...level.children].filter((el) => el.nodeName.toLowerCase() !== 'defs').map((el) => ({ el, b: box(el) })).filter((x) => x.b && x.b.w * x.b.h < area * 0.5);
+      if (items.length < 2) return null;
+      // Group nearby shapes into icons: boxes that touch or sit closer than a fraction of a typical icon size.
+      const sizes = items.map((x) => Math.max(x.b.w, x.b.h)).sort((a, c) => a - c), gap = sizes[Math.floor(sizes.length * 0.9)] * 0.3;
+      const parent = items.map((_, i) => i), find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+      const near = (a, c) => a.x - gap <= c.x + c.w && c.x - gap <= a.x + a.w && a.y - gap <= c.y + c.h && c.y - gap <= a.y + a.h;
+      for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) if (near(items[i].b, items[j].b)) parent[find(i)] = find(j);
+      const groups = new Map(); items.forEach((x, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(x); });
+      if (groups.size < 2) return null;
+      const out = [...groups.values()].map((g) => {
+        const x0 = Math.min(...g.map((x) => x.b.x)), y0 = Math.min(...g.map((x) => x.b.y)), x1 = Math.max(...g.map((x) => x.b.x + x.b.w)), y1 = Math.max(...g.map((x) => x.b.y + x.b.h));
+        const side = Math.max(x1 - x0, y1 - y0) * 1.2, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        let inner = g.map((x) => x.el.outerHTML).join('');
+        for (const w of wrap.slice().reverse()) inner = `<g ${w}>${inner}</g>`;
+        const rp = [...root.attributes].filter((a) => !['viewBox', 'width', 'height', 'xmlns'].includes(a.name)).map((a) => `${a.name}="${a.value}"`).join(' ');
+        return { y: cy, x: cx, svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${+(cx - side / 2).toFixed(2)} ${+(cy - side / 2).toFixed(2)} ${+side.toFixed(2)} ${+side.toFixed(2)}" ${rp}>${defsHtml}${inner}</svg>` };
+      });
+      // Reading order: rows top to bottom, then left to right.
+      const rowH = sizes[Math.floor(sizes.length / 2)] || 1;
+      out.sort((a, c) => (Math.round(a.y / rowH) - Math.round(c.y / rowH)) || a.x - c.x);
+      return out.map((x) => x.svg);
+    } finally { host.remove(); }
+  }
+  async function addLangFiles(texts) {
+    const b = brand(), L = langOf(b) || { samples: [] }, add = []; let bad = 0, split = 0;
+    const expanded = [];
+    for (const [name, text] of texts) {
+      const parts = splitSheet(text);
+      if (parts && parts.length >= 2) { split += parts.length; parts.forEach((p, i) => expanded.push([`${name.replace(/\.svg$/i, '')}-${i + 1}`, p])); }
+      else expanded.push([name, text]);
+    }
+    for (const [name, text] of expanded) { const r = sanitizeSvg(text); if (r) add.push({ name: name.replace(/\.svg$/i, '').slice(0, 40), svg: r.svg }); else bad++; }
+    const samples = [...L.samples, ...add].slice(0, 30);
+    await saveLang(b.id, { ...L, samples, profile: null, updated: Date.now() });
+    renderLangSamples(); renderBrandPanel();
+    $('#langStatus').textContent = `נוספו ${Math.min(add.length, 30 - L.samples.length)} דוגמאות${split ? ` (קובץ עם כמה אייקונים פוצל ל־${split})` : ''}${bad ? `, ${bad} לא נקראו (צריך SVG)` : ''}. ${samples.length >= 30 ? 'הגעתם למקסימום של 30.' : ''} אפשר למחוק בלחיצה על × דוגמה שפוצלה לא נכון.`;
+  }
+
+  async function analyzeLang() {
+    const b = brand(), L0 = langOf(b); const st = $('#langStatus');
+    if (!L0 || L0.samples.length < 2) { st.textContent = 'צריך לפחות 2 דוגמאות'; return; }
+    st.textContent = 'ממיר את הדוגמאות לגריד של 24…';
+    const L = { ...L0, samples: L0.samples.map((x) => ({ ...x, norm: normalizeSample(x.svg) || x.norm || null })) };
+    const measured = measureLang(L.samples); let prof = { measured, at: Date.now() };
+    const sample = await cap('sample');
+    if (sample) {
+      st.textContent = 'Claude מנתח את שפת האייקונים לעומק…';
+      try {
+        const r = await sample.json(`You are an icon designer analysing a studio's icon family for the brand "${b.name}" so that new icons can be drawn indistinguishably in the same language.
+Image: the sample icons as drawn (in order, left to right, top to bottom).
+The same samples converted to 24x24 path data ("data-role":"accent" = second colour, "fill" = filled shape):
+${L.samples.slice(0, 16).map((x, i) => `#${i}: ${JSON.stringify(x.norm || x.svg).slice(0, 1800)}`).join('\n')}
+Measured: ${JSON.stringify(measured)}
+1) For every sample, name its subject in 1-3 English words (what a generic icon library would call it) and a search keyword.
+2) Write 8-14 LANGUAGE RULES that are specific and checkable, with numbers in 24-grid units where possible. Cover: stroke vs fill; how lines end (caps, cut angles); corners (radius in units, sharp, chamfer); deliberate gaps/breaks (where, how long); curves vs straight lines; recurring motifs (e.g. a double-arch top edge, a broken outline, a tick, a dot); how much detail (elements per icon); proportions and padding in the 24 frame; how the second colour or fills are used; anything that differs from a generic icon set like Lucide.
+3) A short summary.
+Return ONLY JSON: {"subjects":[{"i":0,"subject":"shield","search":"shield"}],"rules":[{"en":"rule in English","he":"the same rule in Hebrew"}],"notes":"English summary, max 60 words","notesHe":"Hebrew summary, max 45 words","style":"outline|duotone|twotone|gradient"}`, { modelTier: 'complex', images: [await samplesSheet(L.samples)] });
+        const subj = {}; for (const x of (r && Array.isArray(r.subjects) ? r.subjects : [])) if (Number.isInteger(x.i) && L.samples[x.i]) subj[x.i] = { subject: String(x.subject || '').slice(0, 40), search: String(x.search || x.subject || '').slice(0, 40) };
+        const pairs = [];
+        for (const [i, v] of Object.entries(subj)) { const hit = searchIcons(v.search, 8); const lib = hit.find((h) => h.src === 'lu') || hit[0]; if (lib) pairs.push({ i: +i, lib: lib.n }); }
+        prof = { ...prof, notes: String(r && r.notes || '').slice(0, 700), notesHe: String(r && r.notesHe || '').slice(0, 600), style: r && r.style || null,
+          rules: (Array.isArray(r && r.rules) ? r.rules : []).slice(0, 16).map((x) => ({ en: String(x.en || x).slice(0, 260), he: String(x.he || '').slice(0, 260) })),
+          subjects: L.samples.map((_, i) => (subj[i] ? subj[i].subject : null)), pairs };
+      } catch (e) { st.textContent = 'הניתוח של Claude נכשל, נשמרו רק המדידות.'; }
+    }
+    await saveLang(b.id, { ...L, profile: prof });
+    renderLangSamples(); renderBrandPanel(); if (sample && prof.rules) st.textContent = `הניתוח נשמר: ${prof.rules.length} כללי שפה ו־${(prof.pairs || []).length} זוגות "לפני ← אחרי". הם ישמשו בכל התאמה ויצירה.`;
+  }
+  function paneLang() {
+    const b = brand(), d = $('#stBody');
+    d.innerHTML = `<div class="st-pane"><p class="status st-sub">אייקונים שהסטודיו עיצב למותג. המנוע לומד מהם את השפה ומתאים אליה כל אייקון.</p>
+      <div class="row" style="flex-wrap:wrap"><label class="btn primary">+ העלאת קובצי SVG<input type="file" id="langFile" accept=".svg,image/svg+xml" multiple hidden></label><button class="btn" id="langPasteBtn">הדבקת קוד SVG</button><button class="btn" id="langAnalyze">ניתוח השפה</button><span class="status" id="langStatus">מומלץ 6–20 אייקונים מגוונים. אפשר קובץ לכל אייקון, או קובץ SVG אחד עם כל האייקונים, והוא יפוצל אוטומטית.</span></div>
+      <div id="langPasteBox" hidden><textarea class="text mono" id="langPaste" rows="4" placeholder="<svg ...>...</svg>  אפשר כמה אייקונים ברצף"></textarea><div class="row" style="margin-top:6px"><button class="btn small" id="langPasteAdd">הוספה</button></div></div>
+      <div class="lang-grid" id="langGrid"></div>
+      <div id="langProfile"></div>
+      <div class="field" style="margin:0"><label for="langDesigner">הערות המעצב (עדיפות עליונה)</label><textarea class="text" id="langDesigner" rows="3" placeholder="מה Claude מפספס? למשל: הקצה העליון של כל צורה סגורה הוא קשת כפולה. תמיד יש שבירה קטנה בקו המתאר. בלי מילויים. מקסימום 4 רכיבים."></textarea><div class="row" style="margin-top:6px"><button class="btn small" id="langDesignerSave">שמירת ההערות</button></div></div></div>`;
+    $('#langFile').onchange = async (e) => { const files = [...e.target.files]; const texts = await Promise.all(files.map(async (f) => [f.name, await f.text()])); e.target.value = ''; addLangFiles(texts); };
+    $('#langPasteBtn').onclick = () => { $('#langPasteBox').hidden = !$('#langPasteBox').hidden; };
+    $('#langPasteAdd').onclick = () => { const t = $('#langPaste').value; const parts = t.match(/<svg[\s\S]*?<\/svg>/gi) || []; addLangFiles(parts.map((p, i) => [`pasted-${Date.now().toString(36)}-${i + 1}`, p])); $('#langPaste').value = ''; };
+    $('#langAnalyze').onclick = analyzeLang;
+    renderLangSamples();
+  }
+
+  // ---------- adapt icons to the brand language ----------
+  const ADAPT = { items: [], busy: false, check: true };
+  function adaptPrompt(b, L, targets, n) {
+    return `${langBlock(b, L)}
+
+TASK: Redraw each target icon so it keeps its subject and is instantly recognisable, but is drawn in the brand icon language above: it must look like the studio drew it as part of the same family.
+Work like the BEFORE → AFTER examples: start from the target's library geometry and apply the same transformations the studio applied (corners, terminals, gaps, motifs, proportions, detail level, colour roles). Obey every language rule and the designer notes.
+The app applies stroke width ${b.stroke}, ${b.cap} caps, ${b.join} joins and the brand colours itself, so focus on geometry: proportions, corner treatment, terminals, gaps, angles, detail level, motifs.
+To use the brand's second colour on part of the icon, add "data-role":"accent" to that element's attributes. For a filled shape add "data-role":"fill". Use these only if the samples do.
+Output geometry on a 24x24 grid inside 2..22, elements: path, circle, ellipse, rect, line, polyline, polygon. 1-10 elements per icon.
+Targets (24x24 Lucide-style geometry):
+${targets.map((t) => JSON.stringify({ id: t.n, name: t.b, elements: t.e })).join('\n')}
+${n > 1 ? `Make ${n} variations, from closest to the original to most stylised. All must clearly be the same subject.` : 'Make 1 version.'}
+Return ONLY JSON: {"results":[{"id":"<target id>","options":[{"name":"kebab-name","tags":["..."],"elements":[["path",{"d":"..."}]]}]}]}`;
+  }
+  async function adaptOne(sample, b, L, it, n, sheet) {
+    const r = await sample.json(adaptPrompt(b, L, [it.src], n), { modelTier: 'complex', images: [sheet] });
+    const res = (r && Array.isArray(r.results) ? r.results : []).find((x) => x.id === it.src.n) || (r && r.results && r.results[0]);
+    let opts = (res && Array.isArray(res.options) ? res.options : []).map((o, k) => cleanIcon({ ...o, name: o.name || it.src.b, tags: [...(o.tags || []), ...it.src.t.slice(0, 6)] }, k)).filter(Boolean);
+    if (!opts.length) return;
+    it.options = opts; renderAdapt();
+    if (!ADAPT.check) return;
+    it.stage = 'בדיקה מול הדוגמאות…'; renderAdapt();
+    try {
+      const fix = await sample.json(`${langBlock(b, L)}
+CHECK: Image 1 shows the studio samples. Image 2 shows candidate redraws of "${it.src.b}" on a 24-unit grid, labelled in order.
+For each candidate find every way it differs from the studio language and rules: corners, terminals, gaps, motifs, proportions, stroke rhythm, detail level, colour roles; also anything that makes the subject "${it.src.b}" unclear. Return corrected candidates that a viewer could not tell apart from the studio's own icons, still clearly showing "${it.src.b}". Keep each candidate's own idea.
+Candidates: ${JSON.stringify(opts.map((o) => ({ name: o.name, elements: o.e })))}
+Return ONLY JSON: {"options":[{"name":"...","elements":[["path",{"d":"..."}]]}]}`, { modelTier: 'complex', images: [sheet, await optionSheet(opts)] });
+      const fixed = (fix && Array.isArray(fix.options) ? fix.options : []).map((o, k) => cleanIcon({ ...o, name: o.name || it.src.b, tags: it.src.t.slice(0, 6) }, k + 20)).filter(Boolean);
+      if (fixed.length) { it.options = fixed; it.picked = Math.min(it.picked, fixed.length - 1); }
+    } catch (e) { /* keep the first pass */ }
+  }
+  async function runAdapt(targetNames, n) {
+    const b = brand(), L = langOf(b), st = $('#adStatus');
+    const sample = await cap('sample');
+    if (!sample) { st.textContent = 'ההתאמה עובדת רק בתוך claude.ai, כי היא משתמשת ב־Claude.'; return; }
+    if (ADAPT.busy) return; ADAPT.busy = true; $$('#stBody .btn.primary').forEach((x) => x.disabled = true);
+    const sheet = await samplesSheet(L.samples);
+    const targets = targetNames.map((x) => icon(x)).filter(Boolean);
+    ADAPT.items = targets.map((t) => ({ src: t, options: [], picked: 0, keep: true, stage: 'ממתין…', saved: null }));
+    ADAPT.focus = null; renderAdapt();
+    // Each icon gets its own request (no mixing between icons), two at a time.
+    const per = targets.length === 1 ? 3 : 2; let next = 0, done = 0;
+    const worker = async () => {
+      while (next < ADAPT.items.length) {
+        const it = ADAPT.items[next++]; it.stage = 'Claude מצייר…'; renderAdapt();
+        try { await adaptOne(sample, b, L, it, per, sheet); } catch (e) { it.error = (e && e.message) || 'נכשל'; }
+        it.stage = null; done++; st.textContent = `הותאמו ${done} מתוך ${targets.length}…`; renderAdapt();
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    const ok = ADAPT.items.filter((x) => x.options.length).length;
+    st.textContent = ok ? `הותאמו ${ok} מתוך ${targets.length}. בחרו גרסה בכל שורה ושמרו.` : 'לא התקבלו התאמות תקינות. נסו שוב.';
+    ADAPT.busy = false; $$('#stBody .btn.primary').forEach((x) => x.disabled = false); renderAdapt();
+  }
+  // Large side-by-side view: the original next to the chosen option, plus the real small sizes.
+  function compareView(src, opt, b, key) {
+    const big = (ic, lbl, id) => `<figure class="cmp-big"><div class="cmp-plate">${G.svgStatic(ic, b, { size: 200, id })}</div><figcaption>${lbl}</figcaption></figure>`;
+    const sizes = (ic, id) => `<div class="cmp-sizes">${[16, 24, 32, 48].map((n) => `<span>${G.svgStatic(ic, b, { size: n, id: id + n })}<small>${n}</small></span>`).join('')}</div>`;
+    return `<div class="cmp">${big(src, 'המקור · ' + esc(src.n), 'cs' + key)}<span class="ad-arrow">←</span>${opt ? big(opt, 'בשפת המותג', 'co' + key) : '<div class="cmp-big"><div class="cmp-plate"></div></div>'}</div>
+      <div class="cmp-row">${sizes(src, 'ss' + key)}${opt ? sizes(opt, 'so' + key) : ''}</div>`;
+  }
+  function renderAdapt() {
+    const el = $('#adList'); if (!el) return; const b = brand();
+    if (ADAPT.focus == null || !ADAPT.items[ADAPT.focus]) ADAPT.focus = ADAPT.items.findIndex((x) => x.options.length);
+    const f = ADAPT.items[ADAPT.focus];
+    el.innerHTML = (f ? `<div class="ad-focus">${compareView(f.src, f.options[f.picked] || f.options[0], b, 'f')}</div>` : '')
+      + ADAPT.items.map((it, i) => `<div class="ad-row" data-focus="${i}" aria-current="${i === ADAPT.focus}">
+        <label class="ad-keep" title="לשמור"><input type="checkbox" data-adk="${i}" ${it.keep && it.options.length ? 'checked' : ''} ${it.options.length ? '' : 'disabled'}></label>
+        <div class="ad-src" title="${it.src.n}">${G.svgStatic(it.src, b, { size: 72, id: 'as' + i })}<span>${it.src.n}</span></div>
+        <span class="ad-arrow">←</span>
+        <div class="ad-opts">${it.options.length ? it.options.map((o, k) => `<button class="gen-opt" data-adi="${i}" data-ado="${k}" aria-pressed="${it.picked === k}" title="הצגה בגדול">${G.svgStatic(o, b, { size: 96, id: `ao${i}_${k}` })}<span class="gen-sm">${G.svgStatic(o, b, { size: 20, id: `aos${i}_${k}` })}</span></button>`).join('') : ''}${it.stage ? `<span class="status">${it.stage}</span>` : !it.options.length ? `<span class="status">${it.error ? 'נכשל: ' + esc(it.error) : 'אין תוצאה'}</span>` : ''}</div>
+        <div class="ad-act">${it.saved ? `<span class="ad-ok">✓ ${it.saved.update ? 'עודכן' : 'נשמר'}<small class="mono">${it.saved.name}</small></span>` : ''}${it.options.length ? `<button class="btn small${it.saved ? '' : ' primary'}" data-adsave="${i}">${it.src.src === 'oz' ? 'עדכון האייקון' : it.saved ? 'שמירה שוב' : 'שמירה'}</button>` : ''}</div></div>`).join('');
+    $$('[data-adk]', el).forEach((x) => { x.onclick = (e) => e.stopPropagation(); x.onchange = () => { ADAPT.items[+x.dataset.adk].keep = x.checked; renderAdaptSave(); }; });
+    $$('[data-adi]', el).forEach((x) => x.onclick = (e) => { e.stopPropagation(); ADAPT.items[+x.dataset.adi].picked = +x.dataset.ado; ADAPT.focus = +x.dataset.adi; renderAdapt(); });
+    $$('[data-focus]', el).forEach((x) => x.onclick = () => { ADAPT.focus = +x.dataset.focus; renderAdapt(); });
+    $$('[data-adsave]', el).forEach((x) => x.onclick = async (e) => { e.stopPropagation(); x.disabled = true; const it = ADAPT.items[+x.dataset.adsave]; const r = await saveOne(it, $('#adReplace').checked); renderAdapt(); if (r) toast(r.update ? `${r.name} עודכן` : `${r.name} נשמר בספריית OZ`); });
+    renderAdaptSave();
+  }
+  function renderAdaptSave() { const sv = $('#adSave'), k = ADAPT.items.filter((x) => x.keep && x.options.length).length; if (sv) { sv.disabled = ADAPT.busy || !k; sv.textContent = k ? `שמירת כל המסומנים (${k})` : 'שמירת המסומנים'; } const ft = $('#adFoot'); if (ft) ft.hidden = !ADAPT.items.length; }
+
+  async function saveOne(it, replace) {
+    const b = brand(), o = it.options[it.picked] || it.options[0]; if (!o) return null;
+    const update = it.src.src === 'oz';
+    let name = it.src.n;
+    if (!update) { const base = `${b.id}-${it.src.b}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); let k = 2; name = 'oz-' + base; while (S.byName.has(name)) name = `oz-${base}-${k++}`; }
+    const prev = update && it.src.custom ? it.src.custom : {};
+    const doc = { ...prev, n: name, e: o.e, t: [...new Set([...(prev.t || []), ...o.t, ...it.src.b.split('-'), b.name.toLowerCase()])].slice(0, 16), brand: b.id, from: prev.from || it.src.n, created: prev.created || Date.now(), updated: Date.now() };
+    G.uncache(name);
+    await saveCustomIcon(doc);
+    addCustomIcons([doc, ...S.icons.filter((x) => x.src === 'oz' && x.n !== name).map((x) => x.custom)]);
+    if (!update) {
+      if (replace) { const i = S.set.indexOf(it.src.n); if (i >= 0) S.set[i] = name; else if (!S.set.includes(name)) S.set.push(name); } else if (!S.set.includes(name)) S.set.push(name);
+      if (S.cur === it.src.n) S.cur = name;
+    }
+    it.saved = { name, update }; it.src = icon(name) || it.src;
+    if (ADAPT.pick) ADAPT.pick = ADAPT.pick.map((x) => (x === (prev.n || '') ? name : x));
+    saveSession(); renderTray(); renderGrid(); renderInspector();
+    return it.saved;
+  }
+  async function saveAdapted() {
+    const replace = $('#adReplace').checked; let n = 0, up = 0;
+    for (const it of ADAPT.items) { if (!it.keep || !it.options.length) continue; const r = await saveOne(it, replace); if (r) { n++; if (r.update) up++; } }
+    renderAdapt();
+    $('#adStatus').textContent = `נשמרו ${n} אייקונים${up ? ` (${up} עודכנו במקום)` : ''}${replace ? '. החדשים הוחלפו בסט.' : '. החדשים נוספו לסט.'}`; toast(`נשמרו ${n} אייקונים בשפת ${brand().name}`);
+  }
+  function searchIcons(q, n = 18) {
+    const sq = S.q, sl = S.lib; S.q = q; S.lib = 'all';
+    let r = []; try { r = filtered(); } finally { S.q = sq; S.lib = sl; }
+    return r.slice(0, n);
+  }
+  function paneAdapt(mode) {
+    const b = brand(), L = langOf(b), d = $('#stBody');
+    if (!L || L.samples.length < 2) { openStudio('samples'); toast('קודם מוסיפים דוגמאות של אייקוני הסטודיו למותג הזה'); return; }
+    if (mode === 'one') mode = 'pick';
+    if (!ADAPT.pick || !ADAPT.pick.length) ADAPT.pick = S.byName.has(S.cur) ? [S.cur] : [];
+    const setList = S.set.filter((x) => S.byName.has(x));
+    const targets = () => (mode === 'set' ? setList : ADAPT.pick);
+    d.innerHTML = `<div class="st-pane"><p class="status st-sub">האייקונים מצוירים מחדש בשפה של ${L.samples.length} הדוגמאות של הסטודיו${L.profile && L.profile.notes ? ', כולל ניתוח השפה' : ''}.</p>
+      <div class="field" style="margin:0"><span class="lbl">מה להחליף</span>${seg('adsrc', [['pick', 'אייקונים מסוימים'], ['set', `כל הסט (${setList.length})`]], mode)}</div>
+      ${mode === 'pick' ? `<div class="ad-pick">
+        <div class="field" style="margin:0"><span class="lbl">נבחרו <b id="adCount">${ADAPT.pick.length}</b></span><div class="row" id="adChips" style="gap:6px;flex-wrap:wrap"></div></div>
+        <label class="search" style="max-width:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="adQ" type="search" placeholder="חיפוש אייקון להחלפה, בעברית או באנגלית: עגלה, תשלום, truck…" autocomplete="off"></label>
+        <div class="row" id="adResults" style="gap:6px;flex-wrap:wrap"></div>
+        ${setList.length ? `<div class="field" style="margin:0"><span class="lbl">או מהסט</span><div class="row" id="adFromSet" style="gap:6px;flex-wrap:wrap"></div></div>` : ''}
+      </div>` : ''}
+      <div class="field" style="margin:0"><span class="lbl">בשפה של הדוגמאות</span><div class="lang-strip">${L.samples.slice(0, 14).map((x) => withSize(x.svg, 28)).join('')}</div></div>
+      <label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="adCheck" ${ADAPT.check ? 'checked' : ''}> שלב בדיקה: Claude משווה כל תוצאה לדוגמאות ומתקן (מדויק יותר, בערך פי 2 זמן)</label>
+      ${L.profile && L.profile.rules ? '' : '<p class="status" style="margin:0">טיפ: הריצו "ניתוח השפה" בלשונית הדוגמאות. בלי הניתוח אין כללים וזוגות "לפני ← אחרי", והתוצאות פחות מדויקות.</p>'}
+      <div class="row"><button class="btn primary" id="adGo"></button><span class="status" id="adStatus"></span></div>
+      <div class="ad-list" id="adList"></div>
+      <div class="ad-foot" id="adFoot" hidden><button class="btn primary" id="adSave" disabled>שמירת המסומנים</button><label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="adReplace" checked> להחליף את המקור בסט</label><span class="status">אייקון מספריית OZ מתעדכן במקום</span></div></div>`;
+    const tile = (n, on, attr) => `<button class="ti ad-t" ${attr}="${n}" title="${n}" aria-pressed="${on}">${svgFor(n, b, { size: 26, id: 'pk' })}</button>`;
+    const refresh = () => {
+      const t = targets(), go = $('#adGo');
+      go.textContent = !t.length ? 'בחרו אייקונים' : t.length === 1 ? `יצירת 3 גרסאות ל־${t[0]}` : `התאמת ${t.length} אייקונים`;
+      go.disabled = !t.length || ADAPT.busy;
+      if (!ADAPT.items.length) $('#adStatus').textContent = t.length > 1 ? 'כל אייקון מותאם בנפרד ומקבל 2 גרסאות' : '';
+      const ch = $('#adChips'); if (ch) { ch.innerHTML = ADAPT.pick.length ? ADAPT.pick.map((n) => `<span class="ti" title="${n}">${svgFor(n, b, { size: 26, id: 'pc' })}<button class="tix" data-unpick="${n}" aria-label="הסרת ${n}">×</button></span>`).join('') : '<span class="status">חפשו אייקון או בחרו מהסט</span>'; $('#adCount').textContent = ADAPT.pick.length;
+        $$('[data-unpick]', ch).forEach((x) => x.onclick = () => { ADAPT.pick = ADAPT.pick.filter((n) => n !== x.dataset.unpick); refresh(); }); }
+      $$('#adResults [data-pick], #adFromSet [data-pick]').forEach((x) => x.setAttribute('aria-pressed', ADAPT.pick.includes(x.dataset.pick)));
+    };
+    const toggle = (n) => { ADAPT.pick = ADAPT.pick.includes(n) ? ADAPT.pick.filter((x) => x !== n) : [...ADAPT.pick, n].slice(0, 30); refresh(); };
+    if (mode === 'pick') {
+      const showResults = (q) => { const el = $('#adResults'); const list = q.trim() ? searchIcons(q) : []; el.innerHTML = list.length ? list.map((x) => tile(x.n, ADAPT.pick.includes(x.n), 'data-pick')).join('') : (q.trim() ? '<span class="status">לא נמצא. נסו מילה אחרת.</span>' : ''); $$('[data-pick]', el).forEach((x) => x.onclick = () => toggle(x.dataset.pick)); };
+      let qt; $('#adQ').oninput = (e) => { clearTimeout(qt); qt = setTimeout(() => showResults(e.target.value), 150); };
+      const fs = $('#adFromSet'); if (fs) { fs.innerHTML = setList.map((n) => tile(n, ADAPT.pick.includes(n), 'data-pick')).join(''); $$('[data-pick]', fs).forEach((x) => x.onclick = () => toggle(x.dataset.pick)); }
+    }
+    $$('.seg[data-k="adsrc"] button').forEach((x) => x.onclick = () => paneAdapt(x.dataset.v));
+    $('#adCheck').onchange = (e) => { ADAPT.check = e.target.checked; };
+    ADAPT.items = []; renderAdapt(); refresh();
+    $('#adGo').onclick = () => { const t = targets(); if (t.length) runAdapt(t).then(refresh); };
+    $('#adSave').onclick = saveAdapted;
+  }
+
+
+  // ---------- icon studio window: adapt / new from description / studio samples ----------
+  let stTab = 'adapt', stMode = 'one';
+  function openStudio(tab, mode) {
+    const d = $('#genDlg'), b = brand(), L = langOf(b), n = L ? L.samples.length : 0;
+    if (tab) stTab = tab; if (mode) stMode = mode;
+    if (stTab === 'adapt' && n < 2 && !tab) stTab = 'samples';
+    d.innerHTML = `<div class="dlg"><div class="dlghead"><div><h2 style="margin:0">סטודיו אייקונים · ${esc(b.name)}</h2><h3>אייקונים שמרגישים שייכים לשפה של המותג</h3></div><button class="btn ghost" data-close>סגירה</button></div>
+      <div class="st-tabs" role="tablist">${[['adapt', 'התאמה לשפת המותג'], ['gen', 'אייקון חדש מתיאור'], ['samples', `דוגמאות הסטודיו (${n})`]].map(([k, l]) => `<button role="tab" data-st="${k}" aria-selected="${k === stTab}">${l}</button>`).join('')}</div>
+      <div id="stBody"></div></div>`;
+    d.querySelector('[data-close]').onclick = () => d.close();
+    $$('[data-st]', d).forEach((x) => x.onclick = () => openStudio(x.dataset.st));
+    if (stTab === 'adapt') paneAdapt(stMode); else if (stTab === 'gen') paneGen(); else paneLang();
+    if (!d.open) d.showModal();
+  }
+  $('#genBtn').onclick = () => openStudio();
 
   // ---------- guide ----------
   function openGuide() {
     const d = $('#guideDlg');
     const sec = (id, title, body) => `<section class="gd-sec" id="gd-${id}"><h3>${title}</h3>${body}</section>`;
     d.innerHTML = `<div class="dlg gd"><div class="dlghead"><div><h2 style="margin:0">מדריך למנוע האייקונים</h2><h3>איך מעצבים, מנפישים ומייצאים אייקונים בשפה של כל חברה</h3></div><button class="btn ghost" data-close>סגירה</button></div>
-      <nav class="gd-toc">${[['what', 'מה זה'], ['brand', 'חברות'], ['style', 'סגנון'], ['find', 'חיפוש'], ['gen', 'יצירת אייקון'], ['set', 'הסט'], ['anim', 'הנפשה'], ['trans', 'מעברים'], ['export', 'ייצוא'], ['tips', 'טיפים']].map(([a, l]) => `<a href="#gd-${a}">${l}</a>`).join('')}</nav>
+      <nav class="gd-toc">${[['what', 'מה זה'], ['brand', 'חברות'], ['style', 'סגנון'], ['find', 'חיפוש'], ['studio', 'סטודיו אייקונים'], ['set', 'הסט'], ['anim', 'הנפשה'], ['trans', 'מעברים'], ['export', 'ייצוא'], ['tips', 'טיפים']].map(([a, l]) => `<a href="#gd-${a}">${l}</a>`).join('')}</nav>
       <div class="gd-body">
       ${sec('what', 'מה זה עושה', `<p>המנוע לוקח אייקוני קו מוכנים ומעצב אותם מחדש לפי השפה הוויזואלית של כל חברה: צבעים, עובי קו, פינות, קצוות ומסגרת. אחר כך אפשר להנפיש אותם ולייצא לכל פורמט שצריך.</p>
         <p>יש בו 7,350 אייקונים משלוש ספריות פתוחות לשימוש מסחרי: <b>Lucide</b> (2,091), <b>Tabler</b> (4,935) ו־<b>Heroicons</b> (324). כולם בנויים על גריד של 24px, כך שהם נראים אחידים גם כשמערבבים ביניהם.</p>`)}
@@ -1091,12 +1531,11 @@ Return ONLY JSON: {"options":[{"name":"...","idea":"short Hebrew sentence","tags
         <li><b>עובי קו, קצה קו ופינות:</b> מעוגלות, חדות או חתוכות. "חדות" הופך גם את הפינות המעוגלות שבתוך האייקון לפינות אמיתיות.</li><li><b>עוצמת המילוי:</b> בדו־טון, כמה חזק הגוון. המילוי תמיד אטום, כך שהוא נראה אותו דבר עם רקע ובלי רקע.</li><li><b>מסגרת:</b> בלי, עיגול או ריבוע מעוגל בצבע לבחירה.</li></ul>`)}
       ${sec('find', 'מציאת אייקונים', `<ul><li><b>חיפוש בספרייה:</b> אפשר לחפש בעברית או באנגלית ("משלוח", "truck"). מילה שלא נמצאת במילון נשלחת ל־Claude לתרגום.</li><li><b>סינון:</b> הכל, Lucide, Tabler או Heroicons. שמות של Tabler מתחילים ב־<span class="mono">tb-</span> ושל Heroicons ב־<span class="mono">hi-</span>.</li>
         <li><b>רשימת מילים:</b> מדביקים רשימה של נושאים (למשל מהבריף), והמנוע מציע אייקון לכל מילה עם חלופות.</li></ul>`)}
-      ${sec('gen', 'יצירת אייקון מתיאור', `<ol><li>בסרגל הספרייה לוחצים <b>"✦ יצירת אייקון"</b> ומתארים מה האייקון צריך להראות, בעברית או באנגלית.</li>
-        <li>אפשר להוסיף <b>תמונות השראה</b> (עד 4) ו<b>אייקונים לחיקוי הסגנון</b>: האייקון הנבחר או אייקונים מהסט.</li>
-        <li><b>קרוב לרפרנס</b> (ברירת המחדל כשיש רפרנס): התמונה מונחת על גריד של 24 יחידות, ו־Claude מודד ממנה מיקומים. 4 האפשרויות הן אותו אייקון ברמות פישוט שונות: נאמן, מנוקה, מפושט ומינימלי. <b>חופשי:</b> 4 רעיונות שונים.</li>
-        <li><b>בדיקה מול הרפרנס:</b> שלב שני שבו האפשרויות מצוירות על אותו גריד ליד הרפרנס, ו־Claude מתקן את מה ששונה. לוקח יותר זמן, אבל התוצאה קרובה יותר.</li>
-        <li>בוחרים אפשרות. אפשר לבקש שיפור ("קו נקי יותר", "בלי הקרניים") ולקבל 4 וריאציות שלה.</li>
-        <li><b>"שמירה במאגר"</b> מוסיף את האייקון לספרייה תחת <b>OZ</b>, עם שם שמתחיל ב־<span class="mono">oz-</span>. הוא משותף לכל הצוות, ומקבל עיצוב, הנפשה, מעברים וייצוא כמו כל אייקון אחר.</li></ol>`)}
+      ${sec('studio', 'סטודיו אייקונים', `<p>הכפתור <b>"✦ סטודיו אייקונים"</b> בסרגל הספרייה פותח חלון אחד עם שלוש לשוניות.</p>
+        <ol><li><b>דוגמאות הסטודיו:</b> מעלים קובצי SVG של אייקונים שהסטודיו עיצב למותג (בפיגמה: לבחור את האייקונים ← Export ← SVG), או מדביקים קוד SVG. מומלץ 6–20 אייקונים מגוונים. "ניתוח השפה" מודד עובי קו, קצה ופינות, ו־Claude מתאר את השפה. אפשר לעדכן בלחיצה את סגנון המותג לפי המדידה.</li>
+        <li><b>התאמה לשפת המותג:</b> בוחרים את האייקון הנבחר או את כל הסט. Claude מצייר אותם מחדש בשפה של הדוגמאות: אותו נושא, אבל נראה כאילו הסטודיו צייר אותו. לאייקון בודד מתקבלות 3 גרסאות. מסמנים מה לשמור, והגרסאות נשמרות בספריית <b>OZ</b> (למשל <span class="mono">oz-volta-truck</span>) ומחליפות את המקור בסט.</li>
+        <li><b>אייקון חדש מתיאור:</b> כותבים מה האייקון צריך להראות, ואפשר להוסיף תמונות השראה ואייקונים לחיקוי. כשלמותג יש דוגמאות, Claude מעצב בשפה שלהן. ב"קרוב לרפרנס" התמונה מונחת על גריד של 24 יחידות, ו־4 האפשרויות הן אותו אייקון ברמות פישוט שונות. שלב שני אופציונלי משווה לרפרנס ומתקן.</li></ol>
+        <p>הכול משותף לכל הצוות, והאייקונים שנשמרים מקבלים עיצוב, הנפשה, מעברים וייצוא כמו כל אייקון אחר.</p>`)}
       ${sec('set', 'הסט שלי', `<ul><li><b>+</b> על אייקון מוסיף אותו לסט שבתחתית המסך. אין הגבלה על מספר האייקונים בסט.</li><li>לחיצה על אייקון בסט פותחת אותו בחלונית האייקון הנבחר. <b>×</b> מסיר אותו מהסט.</li>
         <li>הכפתור של הסט פותח תצוגה של כל הסט מונפש, ומשם מורידים את כולו כ־ZIP בפורמטים שבוחרים, או מעתיקים לפיגמה.</li></ul>`)}
       ${sec('anim', 'הנפשה', `<ul><li>בוחרים הנפשה אחת או כמה יחד, למשל ציור קו + הגדלה. "ללא" מנקה את הבחירה.</li><li><b>משך:</b> מהירות ההנפשה. <b>השהיה בין קווים:</b> בציור קו, כמה כל קו מחכה לקודם. <b>חזרה:</b> בלולאה או פעם אחת.</li>

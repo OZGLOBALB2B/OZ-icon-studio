@@ -243,7 +243,13 @@
   function hexToRgb(h) { h = (h || '#000').replace('#', ''); if (h.length === 3) h = h.split('').map((c) => c + c).join(''); const v = parseInt(h, 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
+  const roleOf = (e) => (e && e.a && e.a['data-role']) || '';
+  // Paint order: filled shapes, then second-colour lines, then the main colour on top, so accents tuck under the outline.
+  const layerOf = (b, g, k) => { const e = g.els[k]; if (roleOf(e) === 'fill') return 0; if (roleOf(e) === 'accent' || (b.style === 'twotone' && k !== g.main)) return 1; return 2; };
+  const paintOrder = (b, g) => g.els.map((_, k) => k).sort((x, y) => layerOf(b, g, x) - layerOf(b, g, y) || x - y);
+  const inOrder = (b, g, arr) => paintOrder(b, g).map((k) => arr[k]).join('');
   function strokeFor(b, g, k, gid) {
+    if (roleOf(g.els[k]) === 'accent') return b.secondary;
     if (b.style === 'gradient') return `url(#${gid})`;
     if (b.style === 'twotone' && k !== g.main) return b.secondary;
     return b.primary;
@@ -273,10 +279,11 @@
     const cs = containerScale(b);
     let defs = '';
     if (b.style === 'gradient') defs = `<defs><linearGradient id="${gid}" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${esc(b.primary)}"/><stop offset="1" stop-color="${esc(b.secondary)}"/></linearGradient></defs>`;
-    const parts = g.els.map((e, k) => {
+    const parts = inOrder(b, g, g.els.map((e, k) => {
       const at = [];
       const sc = strokeFor(b, g, k, gid); if (sc !== b.primary) at.push(`stroke="${esc(sc)}"`);
-      if (b.style === 'duotone' && e.closed) {
+      if (roleOf(e) === 'fill') at.push(`fill="${esc(b.style === 'duotone' ? duoFill(b, opts.bg) : b.secondary)}" stroke="none"`);
+      else if (b.style === 'duotone' && e.closed) {
         const fo = st ? st.fill * (st.el[k] ? st.el[k].f ?? 1 : 1) : 1;
         at.push(`fill="${esc(duoFill(b, opts.bg))}"`); if (fo < 1) at.push(`fill-opacity="${f(fo)}"`);
       }
@@ -286,7 +293,7 @@
         if (d <= 0.001) at.push('stroke-opacity="0"');
       }
       const sh = shapeOf(e, b); return `<${sh.tag} ${attrsOf(sh.a)}${at.length ? ' ' + at.join(' ') : ''}/>`;
-    }).join('');
+    }));
     const tf = st ? gTransform(st.g) : '';
     const op = st && st.g.op < 1 ? ` opacity="${f(st.g.op)}"` : '';
     let inner = centerWrap(g, parts);
@@ -334,13 +341,14 @@
     const gid = id + '-gr';
     let defs = '';
     if (b.style === 'gradient') defs = `<linearGradient id="${gid}" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${esc(b.primary)}"/><stop offset="1" stop-color="${esc(b.secondary)}"/></linearGradient>`;
-    const parts = g.els.map((e, k) => {
+    const parts = inOrder(b, g, g.els.map((e, k) => {
       const at = [];
       const sc = strokeFor(b, g, k, gid); if (sc !== b.primary) at.push(`stroke="${esc(sc)}"`);
-      if (b.style === 'duotone' && e.closed) { at.push(`fill="${esc(duoFill(b, opts.bg))}"`); }
+      if (roleOf(e) === 'fill') at.push(`fill="${esc(b.style === 'duotone' ? duoFill(b, opts.bg) : b.secondary)}" stroke="none"`);
+      else if (b.style === 'duotone' && e.closed) { at.push(`fill="${esc(duoFill(b, opts.bg))}"`); }
       if (elCls[k]) { at.push(`class="${elCls[k]}"`); if (css.includes(`.${elCls[k]}{stroke-dasharray`)) at.push('pathLength="1"'); }
       const sh = shapeOf(e, b); return `<${sh.tag} ${attrsOf(sh.a)}${at.length ? ' ' + at.join(' ') : ''}/>`;
-    }).join('');
+    }));
     const cs = containerScale(b);
     let inner = `<g class="${id}-g">${centerWrap(g, parts)}</g>`;
     if (cs !== 1) inner = `<g transform="translate(12 12) scale(${cs}) translate(-12 -12)">${inner}</g>`;
@@ -381,7 +389,7 @@
     const states = []; for (let t = 0; t <= op; t++) states.push(animState(type, t / op, n, anim && anim.loop, anim && anim.stagger, anim && anim.blur));
     const cs = containerScale(b), k = (W / 24) * cs;
     const lc = { butt: 1, round: 2, square: 3 }[b.cap] || 2, lj = { miter: 1, round: 2, bevel: 3 }[b.join] || 2;
-    const elGroups = g.els.map((e, idx) => {
+    const elGroups0 = g.els.map((e, idx) => {
       const it = shapeOf(e, b).subs.map((sp, j) => ({ ty: 'sh', nm: `${e.tag}-${j}`, ks: stat(lottieShape(sp)) }));
       const dvals = states.map((s) => f(s.el[idx].d * 100));
       if (dvals.some((v) => v !== 100)) it.push({ ty: 'tm', nm: 'Draw', s: stat(0), e: animProp(dvals), o: stat(0), m: 1 });
@@ -389,16 +397,18 @@
         const c1 = rgb01(b.primary), c2 = rgb01(b.secondary);
         it.push({ ty: 'gs', nm: 'Stroke', o: stat(100), w: stat(f(b.stroke)), g: { p: 2, k: stat([0, c1[0], c1[1], c1[2], 1, c2[0], c2[1], c2[2]]) }, s: stat([2, 2]), e: stat([22, 22]), t: 1, lc, lj, ml: 4 });
       } else {
-        const col = b.style === 'twotone' && idx !== g.main ? b.secondary : b.primary;
-        it.push({ ty: 'st', nm: 'Stroke', c: stat(rgb01(col)), o: stat(100), w: stat(f(b.stroke)), lc, lj, ml: 4 });
+        const col = roleOf(e) === 'accent' || (b.style === 'twotone' && idx !== g.main) ? b.secondary : b.primary;
+        if (roleOf(e) !== 'fill') it.push({ ty: 'st', nm: 'Stroke', c: stat(rgb01(col)), o: stat(100), w: stat(f(b.stroke)), lc, lj, ml: 4 });
       }
-      if (b.style === 'duotone' && e.closed) {
+      if (roleOf(e) === 'fill') it.push({ ty: 'fl', nm: 'Fill', c: stat(rgb01(b.style === 'duotone' ? duoFill(b, opts.bg) : b.secondary)), o: stat(100), r: 1 });
+      else if (b.style === 'duotone' && e.closed) {
         const fo = 100;
         it.push({ ty: 'fl', nm: 'Fill', c: stat(rgb01(duoFill(b, opts.bg))), o: animProp(states.map((s) => f(fo * s.fill * (s.el[idx].f ?? 1)))), r: 1 });
       }
       it.push(trDefault());
       return { ty: 'gr', nm: `${e.tag} ${idx + 1}`, it };
-    }).reverse();
+    });
+    const elGroups = paintOrder(b, g).map((k) => elGroups0[k]).reverse();
     const glyph = { ty: 'gr', nm: icon.n, it: [...elGroups, { ...trDefault(), p: stat([W / 2, W / 2]), a: stat([f(12 - g.ox), f(12 - g.oy)]), s: stat([f(k * 100), f(k * 100)]) }] };
     const ks = {
       o: animProp(states.map((s) => f(s.g.op * 100))),
@@ -417,5 +427,5 @@
     return { v: '5.7.4', fr, ip: 0, op, w: W, h: W, nm: `${icon.n} · ${type}`, ddd: 0, assets: [], layers, meta: { g: 'OZ Icon Studio' } };
   }
 
-  G.IconGeo = { shapeOf, elToD, parsePath, prep, animState, ANIMS, svgStatic, svgAnimated, lottie, hexToRgb, util: { duoFill, f, esc, clamp, eOut, eInOut, eBack, containerMarkup, containerScale, rgb01, stat, animProp, trDefault } };
+  G.IconGeo = { uncache: (n) => cache.delete(n), shapeOf, elToD, parsePath, prep, animState, ANIMS, svgStatic, svgAnimated, lottie, hexToRgb, util: { duoFill, f, esc, clamp, eOut, eInOut, eBack, containerMarkup, containerScale, rgb01, stat, animProp, trDefault } };
 })(typeof window !== 'undefined' ? window : globalThis);
